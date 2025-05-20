@@ -35,8 +35,8 @@ pub enum AppError {
     #[error("Process error: {0}")]
     ProcessError(String),
 
-    #[error("Session not found: {0}")]
-    SessionNotFound(u32),
+    #[error("Session not found for ID: {0}")]
+    SessionNotFound(String), // Changed from u32 to String for UUIDs
 
     #[error("Edit error: {0}")]
     EditError(String),
@@ -45,15 +45,26 @@ pub enum AppError {
     SerdeJsonError(#[from] serde_json::Error),
 
     #[error("Hyper error: {0}")]
-    HyperError(#[from] hyper::Error),
+    HyperError(#[from] hyper::Error), // If SSE is used
+
+    #[error("Reqwest HTTP error: {0}")]
+    ReqwestError(#[from] reqwest::Error), // For URL reading
+
+    #[error("Operation timed out: {0}")]
+    TimeoutError(String),
+
+    #[error("Invalid argument: {0}")]
+    InvalidInputArgument(String),
 }
 
 // Helper to convert AppError to CallToolError for MCP responses
 impl From<AppError> for rust_mcp_schema::schema_utils::CallToolError {
     fn from(err: AppError) -> Self {
+        // Log the full error internally for debugging before sending a potentially simplified one to Claude
+        tracing::error!("AppError occurred: {:?}", err);
         rust_mcp_schema::schema_utils::CallToolError::new(std::io::Error::new(
             std::io::ErrorKind::Other,
-            err.to_string(),
+            err.to_string(), // This will be the message Claude sees
         ))
     }
 }

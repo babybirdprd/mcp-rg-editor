@@ -1,117 +1,145 @@
 use crate::config::Config;
 use crate::error::AppError;
-use std::path::{Path, PathBuf};
-use anyhow::Result;
+use std::path::{Component, Path, PathBuf};
+use anyhow::Result; // Using anyhow's Result for internal operations here
+use tracing::debug;
 
-/// Validates if the given `target_path` is within one of the `allowed_directories`
-/// and also under the `files_root`.
-/// Returns the canonicalized, absolute path if valid.
+/// Expands tilde (~) in a path string to the user's home directory.
+pub fn expand_tilde_path_buf(path_str: &str) -> Result<PathBuf, AppError> {
+    shellexpand::tilde(path_str)
+        .map(PathBuf::from)
+        .map_err(|e| AppError::InvalidPath(format!("Failed to expand tilde for path '{}': {}", path_str, e)))
+}
+
+/// Normalizes a path: expands tilde, makes absolute, canonicalizes if exists.
+/// If the path doesn't exist, it normalizes up to the closest existing parent.
+fn normalize_path(path_str: &str, files_root: &Path) -> Result<PathBuf, AppError> {
+    let expanded_path = expand_tilde_path_buf(path_str)?;
+
+    let mut absolute_path = if expanded_path.is_absolute() {
+        expanded_path
+    } else {
+        files_root.join(expanded_path)
+    };
+
+    // Normalize ".." components manually to prevent escaping root if path doesn't exist yet.
+    // This is a simplified normalization. For robust ".." handling before canonicalize,
+    // one might need a more complex path resolution logic.
+    let mut components = Vec::new();
+    for component in absolute_path.components() {
+        match component {
+            Component::ParentDir => {
+                if let Some(Component::Normal(_)) = components.last() {
+                    components.pop();
+                } else if cfg!(unix) && components.is_empty() {
+                    // Trying to `../` from root on Unix, keep it as is for now
+                    // or error depending on strictness. For now, let canonicalize handle.
+                } else if cfg!(windows) && components.len() == 1 && matches!(components.first(), Some(Component::Prefix(_))) {
+                    // Trying to `../` from drive root on Windows
+                }
+            }
+            _ => components.push(component),
+        }
+    }
+    absolute_path = components.iter().collect();
+
+
+    // Attempt to canonicalize. If it fails (e.g. path doesn't exist),
+    // work with the constructed absolute path.
+    match absolute_path.canonicalize() {
+        Ok(canonical_path) => Ok(canonical_path),
+        Err(_) => Ok(absolute_path), // Path might not exist yet (e.g. for write_file, create_directory)
+    }
+}
+
+
+/// Validates if the given `target_path_str` is within the `files_root`
+/// and one of the `allowed_directories`.
+/// Returns the normalized, absolute path if valid.
+/// `check_existence` flag determines if the path itself must exist.
 pub fn validate_path_access(
     target_path_str: &str,
     config: &Config,
     check_existence: bool,
 ) -> Result<PathBuf, AppError> {
-    let mut target_path = PathBuf::from(target_path_str);
+    debug!(target_path = %target_path_str, check_existence = %check_existence, "Validating path access");
+    let normalized_target_path = normalize_path(target_path_str, &config.files_root)?;
+    debug!(normalized_path = %normalized_target_path.display(), "Normalized path");
 
-    // If path is relative, join it with files_root
-    if target_path.is_relative() {
-        target_path = config.files_root.join(target_path);
-    }
-    
-    // Canonicalize the path to resolve symlinks and ".."
-    let canonical_target_path = target_path
-        .canonicalize()
-        .map_err(|e| AppError::InvalidPath(format!("Failed to canonicalize path '{}': {}", target_path.display(), e)))?;
-
-    if check_existence && !canonical_target_path.exists() {
-         return Err(AppError::InvalidPath(format!("Path does not exist: {}", canonical_target_path.display())));
+    if check_existence && !normalized_target_path.exists() {
+        return Err(AppError::InvalidPath(format!(
+            "Path does not exist: {}",
+            normalized_target_path.display()
+        )));
     }
 
-    // Check if it's under files_root
-    if !canonical_target_path.starts_with(&config.files_root) {
+    // Check 1: Is it under files_root?
+    // (Unless files_root is itself a broad root like "/" or "C:\")
+    let is_files_root_broad = config.files_root == Path::new("/") ||
+                              (cfg!(windows) && config.files_root.parent().is_none() && config.files_root.is_absolute());
+
+    if !is_files_root_broad && !normalized_target_path.starts_with(&config.files_root) {
+         debug!(path = %normalized_target_path.display(), root = %config.files_root.display(), "Path is outside files_root");
         return Err(AppError::PathTraversal(format!(
-            "Path {} is outside of root {}",
-            canonical_target_path.display(),
+            "Path {} is outside of the configured root directory {}",
+            normalized_target_path.display(),
             config.files_root.display()
         )));
     }
 
-    // Check if it's within any of the allowed_directories
-    let is_allowed = config.allowed_directories.iter().any(|allowed_dir| {
-        canonical_target_path.starts_with(allowed_dir)
+    // Check 2: Is it within any of the allowed_directories?
+    // An allowed directory of "/" or "C:\" means all paths are allowed (already covered by files_root if it's the same)
+    let is_globally_allowed = config.allowed_directories.iter().any(|ad| {
+        ad == Path::new("/") || (cfg!(windows) && ad.parent().is_none() && ad.is_absolute())
     });
 
-    if !is_allowed {
+    if is_globally_allowed {
+        debug!("Access globally allowed by an allowed_directory entry like '/' or 'C:\\'");
+        return Ok(normalized_target_path);
+    }
+    
+    let is_specifically_allowed = config.allowed_directories.iter().any(|allowed_dir_config_entry| {
+        // Normalize the allowed_dir_config_entry from config for comparison
+        // It might be relative to files_root or absolute.
+        let normalized_allowed_dir = normalize_path(allowed_dir_config_entry.to_str().unwrap_or_default(), &config.files_root)
+            .unwrap_or_else(|_| allowed_dir_config_entry.clone()); // Fallback if normalization fails (e.g. it's already absolute and fine)
+        
+        debug!(path_to_check = %normalized_target_path.display(), allowed_dir_entry = %normalized_allowed_dir.display(), "Checking against allowed directory");
+        normalized_target_path.starts_with(&normalized_allowed_dir)
+    });
+
+    if !is_specifically_allowed {
+        debug!(path = %normalized_target_path.display(), allowed_dirs = ?config.allowed_directories, "Path not in allowed_directories");
         return Err(AppError::PathNotAllowed(format!(
-            "Path {} is not in allowed directories",
-            canonical_target_path.display()
+            "Path {} is not within any allowed directories. Allowed: {:?}",
+            normalized_target_path.display(), config.allowed_directories
         )));
     }
 
-    Ok(canonical_target_path)
+    Ok(normalized_target_path)
 }
 
-
-// Helper for operations that create new files/dirs, where the final path might not exist yet,
-// but its parent must be valid.
+/// Validates if the PARENT of `target_path_str` is accessible.
+/// Used for operations that create new files/directories.
 pub fn validate_parent_path_access(
     target_path_str: &str,
     config: &Config,
 ) -> Result<PathBuf, AppError> {
-    let mut target_path = PathBuf::from(target_path_str);
+    debug!(target_path = %target_path_str, "Validating parent path access");
+    let normalized_target_path = normalize_path(target_path_str, &config.files_root)?;
+    debug!(normalized_path = %normalized_target_path.display(), "Normalized path for parent validation");
 
-    if target_path.is_relative() {
-        target_path = config.files_root.join(target_path);
-    }
-
-    // We don't canonicalize target_path itself as it might not exist.
-    // Instead, we find the closest existing parent and canonicalize that.
-    let mut current = target_path.clone();
-    let mut existing_parent = None;
-    while let Some(parent) = current.parent() {
-        if parent.exists() {
-            existing_parent = Some(parent.to_path_buf());
-            break;
+    match normalized_target_path.parent() {
+        Some(parent) => {
+            // Validate the parent directory itself. It must exist.
+            validate_path_access(parent.to_str().unwrap_or_default(), config, true)?;
+            Ok(normalized_target_path) // Return the original normalized target path
         }
-        current = parent.to_path_buf();
-        if parent == Path::new("") || parent == Path::new("/") { // Reached root
-            break;
+        None => {
+            // This means target_path_str is likely a root path like "/" or "C:\"
+            // In this case, we validate the root path itself.
+            validate_path_access(normalized_target_path.to_str().unwrap_or_default(), config, true)?;
+            Ok(normalized_target_path)
         }
     }
-    
-    let parent_to_validate = existing_parent.unwrap_or_else(|| config.files_root.clone());
-
-    let canonical_parent = parent_to_validate
-        .canonicalize()
-        .map_err(|e| AppError::InvalidPath(format!("Failed to canonicalize parent path '{}': {}", parent_to_validate.display(), e)))?;
-    
-    // Ensure the canonical parent is within files_root and allowed_directories
-    if !canonical_parent.starts_with(&config.files_root) {
-        return Err(AppError::PathTraversal(format!(
-            "Parent path {} is outside of root {}",
-            canonical_parent.display(),
-            config.files_root.display()
-        )));
-    }
-    let is_parent_allowed = config.allowed_directories.iter().any(|allowed_dir| {
-        canonical_parent.starts_with(allowed_dir)
-    });
-     if !is_parent_allowed {
-        return Err(AppError::PathNotAllowed(format!(
-            "Parent path {} is not in allowed directories",
-            canonical_parent.display()
-        )));
-    }
-
-    // Construct the final absolute path using the validated parent.
-    // This helps prevent issues if `target_path_str` contained `..` that would go above `canonical_parent`
-    // if naively joined.
-    // Example: target_path_str = "existing_parent/../new_dir"
-    // We need to ensure `new_dir` is created relative to `canonical_parent`'s actual location.
-    // However, PathBuf::join handles this correctly by normalizing.
-    // The main check is that `canonical_parent` itself is allowed.
-
-    // The final path is simply the absolute version of the original target_path,
-    // as its parentage has been validated.
-    Ok(target_path.as_path().to_path_buf())
 }

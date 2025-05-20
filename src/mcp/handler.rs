@@ -3,11 +3,15 @@ use crate::error::AppError;
 use crate::mcp::schemas::*;
 use crate::tools::{
     edit_tool::{EditManager, EditBlockParams},
-    filesystem_tool::{FilesystemManager, ReadFileParams, WriteFileParams, CreateDirectoryParams, ListDirectoryParams, MoveFileParams, SearchFilesParams, GetFileInfoParams},
+    filesystem_tool::{
+        FilesystemManager, ReadFileParams, ReadMultipleFilesParams, WriteFileParams, CreateDirectoryParams,
+        ListDirectoryParams, MoveFileParams, SearchFilesParams, GetFileInfoParams
+    },
     process_tool::{ProcessManager, KillProcessParams},
     ripgrep_tool::{RipgrepSearcher, SearchCodeParams},
     terminal_tool::{TerminalManager, ExecuteCommandParams, ReadOutputParams, ForceTerminateParams},
 };
+use crate::utils::audit_logger::AuditLogger; // Import AuditLogger
 
 use async_trait::async_trait;
 use rust_mcp_sdk::mcp_server::{ServerHandler, server_runtime::ServerRuntimeContext};
@@ -15,35 +19,37 @@ use rust_mcp_schema::{
     CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool,
     schema_utils::CallToolError,
 };
-use serde_json::Value;
-use std::sync::Arc;
+use serde_json::{Value, json};
+use std::sync::{Arc, RwLock as StdRwLock}; // Using std::sync::RwLock for Config
 use tracing::{debug, error, info, instrument};
 
 // Define a struct to hold all managers, initialized with the config
 pub struct AppManagers {
-    config: Arc<Config>, // Keep a clone of config for direct access if needed
+    config: Arc<StdRwLock<Config>>, // Config is now mutable and shared
     filesystem_manager: Arc<FilesystemManager>,
     terminal_manager: Arc<TerminalManager>,
     process_manager: Arc<ProcessManager>,
     ripgrep_searcher: Arc<RipgrepSearcher>,
     edit_manager: Arc<EditManager>,
+    audit_logger: Arc<AuditLogger>, // Add AuditLogger
 }
 
 impl AppManagers {
-    pub fn new(config: Arc<Config>) -> Self {
-        let filesystem_manager = Arc::new(FilesystemManager::new(config.clone()));
-        let terminal_manager = Arc::new(TerminalManager::new(config.clone()));
-        let process_manager = Arc::new(ProcessManager::new(config.clone()));
-        let ripgrep_searcher = Arc::new(RipgrepSearcher::new(config.clone()));
-        let edit_manager = Arc::new(EditManager::new(config.clone(), filesystem_manager.clone()));
+    pub fn new(initial_config: Config) -> Self {
+        let config_arc = Arc::new(StdRwLock::new(initial_config));
+        
+        let audit_logger_arc = Arc::new(AuditLogger::new(config_arc.read().unwrap().clone().into())); // Pass cloned config
+
+        let filesystem_manager_arc = Arc::new(FilesystemManager::new(config_arc.clone()));
         
         Self {
-            config,
-            filesystem_manager,
-            terminal_manager,
-            process_manager,
-            ripgrep_searcher,
-            edit_manager,
+            config: config_arc.clone(),
+            filesystem_manager: filesystem_manager_arc.clone(),
+            terminal_manager: Arc::new(TerminalManager::new(config_arc.clone())),
+            process_manager: Arc::new(ProcessManager::new(config_arc.clone())),
+            ripgrep_searcher: Arc::new(RipgrepSearcher::new(config_arc.clone())),
+            edit_manager: Arc::new(EditManager::new(config_arc.clone(), filesystem_manager_arc)),
+            audit_logger: audit_logger_arc,
         }
     }
 }
@@ -55,9 +61,9 @@ pub struct EnhancedServerHandler {
 }
 
 impl EnhancedServerHandler {
-    pub fn new(config: Arc<Config>) -> Self {
+    pub fn new(initial_config: Config) -> Self {
         Self {
-            managers: Arc::new(AppManagers::new(config)),
+            managers: Arc::new(AppManagers::new(initial_config)),
         }
     }
 }
@@ -73,28 +79,29 @@ impl ServerHandler for EnhancedServerHandler {
         info!("Handling list_tools request");
         let tools = vec![
             // Config
-            Tool::new("get_config", "Get current server configuration.", get_config_schema()),
-            Tool::new("set_config_value", "Set a server configuration value.", set_config_value_schema()),
+            Tool::new("get_config", "Get the complete server configuration as JSON. Includes blockedCommands, defaultShell, allowedDirectories, fileReadLineLimit, fileWriteLineLimit, etc.", get_config_schema()),
+            Tool::new("set_config_value", "Set a specific configuration value by key. WARNING: Use in a separate chat. Changes are in-memory unless persistence is configured. Keys: blockedCommands, defaultShell, allowedDirectories, fileReadLineLimit, fileWriteLineLimit.", set_config_value_schema()),
             // Filesystem
-            Tool::new("read_file", "Read content of a file.", read_file_schema()),
-            Tool::new("write_file", "Write content to a file.", write_file_schema()),
-            Tool::new("create_directory", "Create a directory.", create_directory_schema()),
-            Tool::new("list_directory", "List contents of a directory.", list_directory_schema()),
-            Tool::new("move_file", "Move or rename a file/directory.", move_file_schema()),
-            Tool::new("search_files", "Search for files by name (substring match).", search_files_schema()),
-            Tool::new("get_file_info", "Get metadata for a file or directory.", get_file_info_schema()),
-            // Ripgrep Search
-            Tool::new("search_code", "Search for text/code patterns in files using ripgrep.", search_code_schema()),
+            Tool::new("read_file", "Read content of a local file or URL. Supports line offset/length for local text files. Images returned as base64.", read_file_schema()),
+            Tool::new("read_multiple_files", "Read multiple local files. Images returned as base64.", read_multiple_files_schema()),
+            Tool::new("write_file", "Write/append content to a file. Enforces line limits; chunk large writes.", write_file_schema()),
+            Tool::new("create_directory", "Create directories, including nested ones.", create_directory_schema()),
+            Tool::new("list_directory", "List directory contents with [FILE]/[DIR] prefixes.", list_directory_schema()),
+            Tool::new("move_file", "Move or rename files or directories.", move_file_schema()),
+            Tool::new("search_files", "Find files by name (substring match) with timeout.", search_files_schema()),
+            Tool::new("get_file_info", "Get metadata for a file or directory (size, timestamps, permissions).", get_file_info_schema()),
+            // Code Search
+            Tool::new("search_code", "Search code with Ripgrep (regex, file types, context, timeout).", search_code_schema()),
             // Edit
-            Tool::new("edit_block", "Apply targeted text replacements to a file.", edit_block_schema()),
+            Tool::new("edit_block", "Apply targeted text replacements. Supports expected_replacements, fuzzy matching feedback.", edit_block_schema()),
             // Terminal
-            Tool::new("execute_command", "Execute a terminal command.", execute_command_schema()),
-            Tool::new("read_output", "Read output from a running command session.", read_output_schema()),
-            Tool::new("force_terminate", "Force terminate a command session.", force_terminate_schema()),
-            Tool::new("list_sessions", "List active command sessions.", list_sessions_schema()),
+            Tool::new("execute_command", "Run terminal commands with timeout, background execution, and shell selection.", execute_command_schema()),
+            Tool::new("read_output", "Get new output from a running command session.", read_output_schema()),
+            Tool::new("force_terminate", "Stop a running command session by its session_id.", force_terminate_schema()),
+            Tool::new("list_sessions", "List active command sessions with PIDs and runtime.", list_sessions_schema()),
             // Process
-            Tool::new("list_processes", "List running processes on the system.", list_processes_schema()),
-            Tool::new("kill_process", "Terminate a process by PID.", kill_process_schema()),
+            Tool::new("list_processes", "List system processes (PID, name, CPU/memory).", list_processes_schema()),
+            Tool::new("kill_process", "Terminate a system process by PID.", kill_process_schema()),
         ];
         Ok(ListToolsResult { tools, meta: None, next_cursor: None })
     }
@@ -105,20 +112,28 @@ impl ServerHandler for EnhancedServerHandler {
         request: CallToolRequest,
         _runtime: &ServerRuntimeContext,
     ) -> Result<CallToolResult, CallToolError> {
-        info!("Handling call_tool request for: {}", request.params.name);
-        let args = request.params.arguments.unwrap_or_default();
+        let tool_name = request.params.name.as_str();
+        info!("Handling call_tool request for: {}", tool_name);
+        
+        let args_value = request.params.arguments.clone().unwrap_or(json!({}));
+        self.managers.audit_logger.log_tool_call(tool_name, &args_value).await;
 
         // Helper macro to parse args and call manager method
-        macro_rules! handle_tool {
-            ($manager_field:ident . $method:ident :: <$param_type:ty> ($($extra_args:expr),*)) => {
+        macro_rules! handle_tool_with_params {
+            ($manager_field:ident . $method:ident :: <$param_type:ty>) => {
                 {
-                    let params: $param_type = serde_json::from_value(Value::Object(args))
-                        .map_err(|e| CallToolError::invalid_params(e.to_string()))?;
-                    let result = self.managers.$manager_field.$method($($extra_args,)* ¶ms).await?;
+                    let params: $param_type = serde_json::from_value(args_value.clone()) // Clone args_value
+                        .map_err(|e| {
+                            error!(error = %e, tool = tool_name, "Invalid params for tool");
+                            CallToolError::invalid_params(format!("Invalid arguments for {}: {}", tool_name, e))
+                        })?;
+                    let result = self.managers.$manager_field.$method(¶ms).await?; // Pass as ref
                     Ok(CallToolResult::from_serializable(&result)?)
                 }
             };
-             ($manager_field:ident . $method:ident ()) => {
+        }
+        macro_rules! handle_tool_no_params {
+             ($manager_field:ident . $method:ident) => {
                 {
                     let result = self.managers.$manager_field.$method().await?;
                     Ok(CallToolResult::from_serializable(&result)?)
@@ -126,49 +141,106 @@ impl ServerHandler for EnhancedServerHandler {
             };
         }
         
-        // Helper for config tools (they are not in AppManagers directly)
-        macro_rules! handle_config_tool {
-            (get_config) => {
-                {
-                    let config_clone = self.managers.config.as_ref().clone(); // Clone the config data
-                    Ok(CallToolResult::from_serializable(&config_clone)?)
-                }
-            };
-            (set_config_value) => {
-                Err(CallToolError::internal_error("set_config_value is not implemented yet. Configuration is via environment variables.".to_string()))
-                // TODO: Implement mutable config if desired. Requires RwLock for Config.
-            };
-        }
-
-
-        match request.params.name.as_str() {
+        match tool_name {
             // Config
-            "get_config" => handle_config_tool!(get_config),
-            "set_config_value" => handle_config_tool!(set_config_value),
+            "get_config" => {
+                let config_guard = self.managers.config.read().unwrap();
+                let current_config_data = config_guard.clone(); // Clone the data from behind the lock
+                drop(config_guard); // Release lock
+                // Serialize only the fields relevant to `desktop-commander` for parity
+                let response_config = json!({
+                    "files_root": current_config_data.files_root,
+                    "allowed_directories": current_config_data.allowed_directories,
+                    "blocked_commands": current_config_data.blocked_commands.iter().map(|r| r.as_str().to_string()).collect::<Vec<_>>(), // Convert Regex to String
+                    "default_shell": current_config_data.default_shell,
+                    "file_read_line_limit": current_config_data.file_read_line_limit,
+                    "file_write_line_limit": current_config_data.file_write_line_limit,
+                    // "telemetry_enabled": current_config_data.telemetry_enabled, // Telemetry removed
+                });
+                Ok(CallToolResult::success(Value::Object(serde_json::from_value(response_config).unwrap()))?)
+            },
+            "set_config_value" => {
+                let params: SetConfigValueParams = serde_json::from_value(args_value)
+                    .map_err(|e| CallToolError::invalid_params(e.to_string()))?;
+                
+                let mut config_guard = self.managers.config.write().unwrap();
+                let key = params.key.as_str();
+                let value = params.value; // value is already serde_json::Value
+
+                let mut update_applied = true;
+                match key {
+                    "allowedDirectories" | "blockedCommands" => {
+                        if let Some(arr_val) = value.as_array() {
+                            if key == "allowedDirectories" {
+                                config_guard.allowed_directories = arr_val.iter()
+                                    .filter_map(|v| v.as_str().map(PathBuf::from))
+                                    .collect();
+                            } else { // blockedCommands
+                                config_guard.blocked_commands = arr_val.iter()
+                                    .filter_map(|v| v.as_str())
+                                    .filter_map(|s| Regex::new(&format!(r"^(?:[a-zA-Z_][a-zA-Z0-9_]*=[^ ]* )*{}(?:\s.*|$)", regex::escape(s))).ok())
+                                    .collect();
+                            }
+                        } else { 
+                            update_applied = false;
+                            warn!(key=key, "set_config_value: value for array key was not an array");
+                        }
+                    },
+                    "defaultShell" => {
+                        if let Some(str_val) = value.as_str() { config_guard.default_shell = Some(str_val.to_string()); } 
+                        else { update_applied = false; }
+                    },
+                    "fileReadLineLimit" => {
+                        if let Some(num_val) = value.as_u64() { config_guard.file_read_line_limit = num_val as usize; }
+                        else { update_applied = false; }
+                    },
+                     "fileWriteLineLimit" => {
+                        if let Some(num_val) = value.as_u64() { config_guard.file_write_line_limit = num_val as usize; }
+                        else { update_applied = false; }
+                    },
+                    // "telemetryEnabled" => { // Telemetry removed
+                    //     if let Some(bool_val) = value.as_bool() { config_guard.telemetry_enabled = bool_val; }
+                    //     else { update_applied = false; }
+                    // },
+                    _ => {
+                        update_applied = false;
+                        warn!(key=key, "set_config_value: Unknown or unhandled config key");
+                        return Err(CallToolError::invalid_params(format!("Unknown or read-only config key: {}", key)));
+                    }
+                }
+                drop(config_guard); // Release lock
+
+                if update_applied {
+                     Ok(CallToolResult::text_content(format!("Successfully set config key '{}'. Change is in-memory.", key), None)?)
+                } else {
+                    Err(CallToolError::invalid_params(format!("Invalid value type for config key '{}'", key)))
+                }
+            },
             // Filesystem
-            "read_file" => handle_tool!(filesystem_manager.read_file:: <ReadFileParams>()),
-            "write_file" => handle_tool!(filesystem_manager.write_file:: <WriteFileParams>()),
-            "create_directory" => handle_tool!(filesystem_manager.create_directory:: <CreateDirectoryParams>()),
-            "list_directory" => handle_tool!(filesystem_manager.list_directory:: <ListDirectoryParams>()),
-            "move_file" => handle_tool!(filesystem_manager.move_file:: <MoveFileParams>()),
-            "search_files" => handle_tool!(filesystem_manager.search_files:: <SearchFilesParams>()),
-            "get_file_info" => handle_tool!(filesystem_manager.get_file_info:: <GetFileInfoParams>()),
+            "read_file" => handle_tool_with_params!(filesystem_manager.read_file::<ReadFileParams>),
+            "read_multiple_files" => handle_tool_with_params!(filesystem_manager.read_multiple_files::<ReadMultipleFilesParams>),
+            "write_file" => handle_tool_with_params!(filesystem_manager.write_file::<WriteFileParams>),
+            "create_directory" => handle_tool_with_params!(filesystem_manager.create_directory::<CreateDirectoryParams>),
+            "list_directory" => handle_tool_with_params!(filesystem_manager.list_directory::<ListDirectoryParams>),
+            "move_file" => handle_tool_with_params!(filesystem_manager.move_file::<MoveFileParams>),
+            "search_files" => handle_tool_with_params!(filesystem_manager.search_files::<SearchFilesParams>),
+            "get_file_info" => handle_tool_with_params!(filesystem_manager.get_file_info::<GetFileInfoParams>),
             // Ripgrep
-            "search_code" => handle_tool!(ripgrep_searcher.search_code:: <SearchCodeParams>()),
+            "search_code" => handle_tool_with_params!(ripgrep_searcher.search_code::<SearchCodeParams>),
             // Edit
-            "edit_block" => handle_tool!(edit_manager.edit_block:: <EditBlockParams>()),
+            "edit_block" => handle_tool_with_params!(edit_manager.edit_block::<EditBlockParams>),
             // Terminal
-            "execute_command" => handle_tool!(terminal_manager.execute_command:: <ExecuteCommandParams>()),
-            "read_output" => handle_tool!(terminal_manager.read_output:: <ReadOutputParams>()),
-            "force_terminate" => handle_tool!(terminal_manager.force_terminate:: <ForceTerminateParams>()),
-            "list_sessions" => handle_tool!(terminal_manager.list_sessions()),
+            "execute_command" => handle_tool_with_params!(terminal_manager.execute_command::<ExecuteCommandParams>),
+            "read_output" => handle_tool_with_params!(terminal_manager.read_output::<ReadOutputParams>),
+            "force_terminate" => handle_tool_with_params!(terminal_manager.force_terminate::<ForceTerminateParams>),
+            "list_sessions" => handle_tool_no_params!(terminal_manager.list_sessions),
             // Process
-            "list_processes" => handle_tool!(process_manager.list_processes()),
-            "kill_process" => handle_tool!(process_manager.kill_process:: <KillProcessParams>()),
+            "list_processes" => handle_tool_no_params!(process_manager.list_processes),
+            "kill_process" => handle_tool_with_params!(process_manager.kill_process::<KillProcessParams>),
 
             _ => {
-                error!("Unknown tool called: {}", request.params.name);
-                Err(CallToolError::unknown_tool(request.params.name))
+                error!("Unknown tool called: {}", tool_name);
+                Err(CallToolError::unknown_tool(tool_name.to_string()))
             }
         }
     }

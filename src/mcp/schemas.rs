@@ -1,46 +1,71 @@
 use rust_mcp_schema::ToolInputSchema;
 use serde_json::{json, Map, Value};
-use std::collections::HashMap;
+use std::collections::HashMap; // Keep HashMap for properties
 
 // Helper to create a JSON schema property
-fn create_prop(type_str: &str, description: &str) -> Map<String, Value> {
-    let mut prop = Map::new();
-    prop.insert("type".to_string(), json!(type_str));
-    prop.insert("description".to_string(), json!(description));
-    prop
+fn create_prop(type_str: &str, description: &str) -> Value { // Changed to return Value
+    json!({
+        "type": type_str,
+        "description": description
+    })
 }
 
-fn create_array_prop(item_type_str: &str, description: &str) -> Map<String, Value> {
-    let mut items_prop = Map::new();
-    items_prop.insert("type".to_string(), json!(item_type_str));
-    
-    let mut prop = Map::new();
-    prop.insert("type".to_string(), json!("array"));
-    prop.insert("items".to_string(), Value::Object(items_prop));
-    prop.insert("description".to_string(), json!(description));
-    prop
+fn create_prop_with_default_str(type_str: &str, description: &str, default_val: &str) -> Value {
+    json!({
+        "type": type_str,
+        "description": description,
+        "default": default_val
+    })
 }
 
-fn create_enum_prop(enum_values: Vec<&str>, default_value: &str, description: &str) -> Map<String, Value> {
-    let mut prop = Map::new();
-    prop.insert("type".to_string(), json!("string"));
-    prop.insert("enum".to_string(), json!(enum_values));
-    prop.insert("default".to_string(), json!(default_value));
-    prop.insert("description".to_string(), json!(description));
-    prop
+fn create_prop_with_default_bool(type_str: &str, description: &str, default_val: bool) -> Value {
+    json!({
+        "type": type_str,
+        "description": description,
+        "default": default_val
+    })
 }
+
+fn create_prop_with_default_int(type_str: &str, description: &str, default_val: usize) -> Value {
+    json!({
+        "type": type_str,
+        "description": description,
+        "default": default_val
+    })
+}
+
+fn create_array_prop(item_type_str: &str, description: &str) -> Value {
+    json!({
+        "type": "array",
+        "items": { "type": item_type_str },
+        "description": description
+    })
+}
+
+fn create_enum_prop(enum_values: Vec<&str>, default_value: &str, description: &str) -> Value {
+    json!({
+        "type": "string",
+        "enum": enum_values,
+        "default": default_value,
+        "description": description
+    })
+}
+
+const PATH_GUIDANCE: &str = "IMPORTANT: Always use absolute paths (starting with '/' or drive letter like 'C:\\') or tilde-expanded paths (~/...). Relative paths are resolved against FILES_ROOT.";
+const CMD_PREFIX_DESCRIPTION: &str = "This command can be referenced as \"DC: ...\" or \"use Desktop Commander to ...\" in your instructions.";
 
 
 pub fn get_config_schema() -> ToolInputSchema {
-    ToolInputSchema::new(vec![], None)
+    ToolInputSchema::new(vec![], None) // No arguments
 }
 
 pub fn set_config_value_schema() -> ToolInputSchema {
     let mut properties = HashMap::new();
-    properties.insert("key".to_string(), create_prop("string", "Configuration key to set."));
+    properties.insert("key".to_string(), create_prop("string", "Configuration key to set. Valid keys: blockedCommands, defaultShell, allowedDirectories, fileReadLineLimit, fileWriteLineLimit."));
     properties.insert("value".to_string(), json!({
-        "description": "Value to set for the key. Can be string, number, boolean, or array (as JSON string).",
-        "oneOf": [
+        "description": "Value to set. For array keys (blockedCommands, allowedDirectories), provide a JSON array of strings. For others, a simple string or number.",
+        // "anyOf" is more flexible for schema validation than "oneOf" if type isn't strictly one.
+        "anyOf": [ 
             { "type": "string" },
             { "type": "number" },
             { "type": "boolean" },
@@ -52,88 +77,104 @@ pub fn set_config_value_schema() -> ToolInputSchema {
 
 pub fn read_file_schema() -> ToolInputSchema {
     let mut properties = HashMap::new();
-    properties.insert("path".to_string(), create_prop("string", "Absolute path to the file or URL."));
-    properties.insert("offset".to_string(), json!({
+    properties.insert("path".to_string(), create_prop("string", &format!("Path to the file or URL. {}", PATH_GUIDANCE)));
+    properties.insert("is_url".to_string(), create_prop_with_default_bool("boolean", "Set to true if 'path' is a URL. Default false.", false));
+    properties.insert("offset".to_string(), create_prop_with_default_int("integer", "Line number to start reading from (0-indexed) for local text files. Default 0.", 0));
+    properties.insert("length".to_string(), json!({ // Optional, uses config default
         "type": "integer",
-        "description": "Line number to start reading from (0-indexed). Default 0.",
-        "default": 0
-    }));
-     properties.insert("length".to_string(), json!({
-        "type": "integer",
-        "description": "Maximum number of lines to read. Uses config default if not set.",
-        "optional": true
+        "description": "Maximum number of lines to read for local text files. Uses server default if not set.",
+        "optional": true 
     }));
     ToolInputSchema::new(vec!["path".to_string()], Some(properties))
 }
 
+pub fn read_multiple_files_schema() -> ToolInputSchema {
+    let mut properties = HashMap::new();
+    properties.insert("paths".to_string(), create_array_prop("string", &format!("Array of file paths to read. {}", PATH_GUIDANCE)));
+    ToolInputSchema::new(vec!["paths".to_string()], Some(properties))
+}
+
+
 pub fn write_file_schema() -> ToolInputSchema {
     let mut properties = HashMap::new();
-    properties.insert("path".to_string(), create_prop("string", "Absolute path to the file."));
-    properties.insert("content".to_string(), create_prop("string", "Content to write."));
-    properties.insert("mode".to_string(), create_enum_prop(vec!["rewrite", "append"], "rewrite", "Write mode."));
+    properties.insert("path".to_string(), create_prop("string", &format!("Path to the file. {}", PATH_GUIDANCE)));
+    properties.insert("content".to_string(), create_prop("string", "Content to write. Adhere to server's fileWriteLineLimit."));
+    properties.insert("mode".to_string(), create_enum_prop(vec!["rewrite", "append"], "rewrite", "Write mode: 'rewrite' or 'append'."));
     ToolInputSchema::new(vec!["path".to_string(), "content".to_string()], Some(properties))
 }
 
 pub fn create_directory_schema() -> ToolInputSchema {
     let mut properties = HashMap::new();
-    properties.insert("path".to_string(), create_prop("string", "Absolute path of the directory to create."));
+    properties.insert("path".to_string(), create_prop("string", &format!("Path of the directory to create. Can be nested. {}", PATH_GUIDANCE)));
     ToolInputSchema::new(vec!["path".to_string()], Some(properties))
 }
 
 pub fn list_directory_schema() -> ToolInputSchema {
     let mut properties = HashMap::new();
-    properties.insert("path".to_string(), create_prop("string", "Absolute path of the directory to list."));
+    properties.insert("path".to_string(), create_prop("string", &format!("Path of the directory to list. {}", PATH_GUIDANCE)));
     ToolInputSchema::new(vec!["path".to_string()], Some(properties))
 }
 
 pub fn move_file_schema() -> ToolInputSchema {
     let mut properties = HashMap::new();
-    properties.insert("source".to_string(), create_prop("string", "Absolute source path."));
-    properties.insert("destination".to_string(), create_prop("string", "Absolute destination path."));
+    properties.insert("source".to_string(), create_prop("string", &format!("Source path (file or directory). {}", PATH_GUIDANCE)));
+    properties.insert("destination".to_string(), create_prop("string", &format!("Destination path. {}", PATH_GUIDANCE)));
     ToolInputSchema::new(vec!["source".to_string(), "destination".to_string()], Some(properties))
 }
 
-pub fn search_files_schema() -> ToolInputSchema { // Simple name search
+pub fn search_files_schema() -> ToolInputSchema { 
     let mut properties = HashMap::new();
-    properties.insert("path".to_string(), create_prop("string", "Absolute root path for search."));
-    properties.insert("pattern".to_string(), create_prop("string", "Substring to search for in file/directory names."));
+    properties.insert("path".to_string(), create_prop("string", &format!("Root path for search. {}", PATH_GUIDANCE)));
+    properties.insert("pattern".to_string(), create_prop("string", "Case-insensitive substring to search for in file/directory names."));
+    properties.insert("timeoutMs".to_string(), json!({
+        "type": "integer",
+        "description": "Timeout in milliseconds. Default 30000 (30s).",
+        "optional": true
+    }));
     ToolInputSchema::new(vec!["path".to_string(), "pattern".to_string()], Some(properties))
 }
 
 pub fn get_file_info_schema() -> ToolInputSchema {
     let mut properties = HashMap::new();
-    properties.insert("path".to_string(), create_prop("string", "Absolute path to the file or directory."));
+    properties.insert("path".to_string(), create_prop("string", &format!("Path to the file or directory. {}", PATH_GUIDANCE)));
     ToolInputSchema::new(vec!["path".to_string()], Some(properties))
 }
 
-pub fn search_code_schema() -> ToolInputSchema { // Ripgrep
+pub fn search_code_schema() -> ToolInputSchema { 
     let mut properties = HashMap::new();
-    properties.insert("pattern".to_string(), create_prop("string", "Search pattern (regex or literal)."));
-    properties.insert("path".to_string(), create_prop("string", "Directory to search within (relative to FILES_ROOT, or absolute if allowed). Default is FILES_ROOT."));
-    properties.insert("fixed_strings".to_string(), create_prop("boolean", "Treat pattern as literal string. Default false."));
-    properties.insert("case_sensitive".to_string(), create_prop("boolean", "Perform case-sensitive search. Default false (ripgrep default is smart case)."));
-    properties.insert("line_numbers".to_string(), create_prop("boolean", "Include line numbers. Default true."));
-    properties.insert("context_lines".to_string(), create_prop("integer", "Number of context lines around matches. Default 0."));
-    properties.insert("file_types".to_string(), create_array_prop("string", "List of file types (e.g., 'rust', 'py'). See 'rg --type-list'."));
-    properties.insert("max_depth".to_string(), create_prop("integer", "Maximum search depth."));
-    properties.insert("max_results".to_string(), json!({
+    properties.insert("pattern".to_string(), create_prop("string", "Search pattern (regex or literal string)."));
+    properties.insert("path".to_string(), create_prop_with_default_str("string", &format!("Directory to search within. Relative to FILES_ROOT or absolute if allowed. Default is FILES_ROOT. {}", PATH_GUIDANCE), "."));
+    properties.insert("fixed_strings".to_string(), create_prop_with_default_bool("boolean", "Treat pattern as literal string (no regex). Default false.", false));
+    properties.insert("ignore_case".to_string(), create_prop_with_default_bool("boolean", "Perform case-insensitive search. Ripgrep's default is smart-case. This flag forces ignore-case. Default false.", false));
+    properties.insert("case_sensitive".to_string(), create_prop_with_default_bool("boolean", "Perform case-sensitive search. Overrides ignore_case if both true. Default false.", false)); // Added for clarity from desktop-commander
+    properties.insert("line_numbers".to_string(), create_prop_with_default_bool("boolean", "Include line numbers in results. Default true.", true));
+    properties.insert("context_lines".to_string(), create_prop_with_default_int("integer", "Number of context lines before and after matches. Default 0.", 0));
+    properties.insert("file_pattern".to_string(), json!({ // Was file_types, now file_pattern for glob
+        "type": "string",
+        "description": "Glob pattern to filter files (e.g., \"*.rs\", \"!**/target/*\"). See ripgrep --glob.",
+        "optional": true
+    }));
+    properties.insert("max_depth".to_string(), json!({
         "type": "integer",
-        "description": "Maximum number of matches to return. Default 1000.",
-        "default": 1000
+        "description": "Maximum search depth relative to the search path.",
+        "optional": true
+    }));
+    properties.insert("max_results".to_string(), create_prop_with_default_int("integer", "Maximum number of matches to return. Default 1000.", 1000));
+    properties.insert("include_hidden".to_string(), create_prop_with_default_bool("boolean", "Include hidden files and directories in search. Default false.", false));
+    properties.insert("timeoutMs".to_string(), json!({
+        "type": "integer",
+        "description": "Timeout in milliseconds. Default 30000 (30s).",
+        "optional": true
     }));
     ToolInputSchema::new(vec!["pattern".to_string()], Some(properties))
 }
 
 pub fn edit_block_schema() -> ToolInputSchema {
     let mut properties = HashMap::new();
-    properties.insert("file_path".to_string(), create_prop("string", "Absolute path to the file."));
-    properties.insert("old_string".to_string(), create_prop("string", "The exact string to be replaced."));
+    properties.insert("file_path".to_string(), create_prop("string", &format!("Path to the file. {}", PATH_GUIDANCE)));
+    properties.insert("old_string".to_string(), create_prop("string", "The exact string to be replaced. Include enough context for uniqueness."));
     properties.insert("new_string".to_string(), create_prop("string", "The string to replace with."));
-    properties.insert("expected_replacements".to_string(), json!({
-        "type": "integer",
-        "description": "Number of occurrences expected to be replaced. If 0, replaces all occurrences. Default 1.",
-        "default": 1
-    }));
+    properties.insert("expected_replacements".to_string(), create_prop_with_default_int("integer", "Number of occurrences expected to be replaced. If 0, attempts to replace all. Default 1.", 1));
     ToolInputSchema::new(
         vec!["file_path".to_string(), "old_string".to_string(), "new_string".to_string()],
         Some(properties),
@@ -143,14 +184,23 @@ pub fn edit_block_schema() -> ToolInputSchema {
 pub fn execute_command_schema() -> ToolInputSchema {
     let mut properties = HashMap::new();
     properties.insert("command".to_string(), create_prop("string", "The command to execute."));
-    properties.insert("timeout_ms".to_string(), create_prop("integer", "Timeout in milliseconds for initial output. Default 1000."));
-    properties.insert("shell".to_string(), create_prop("string", "Specific shell to use (e.g., 'bash', 'powershell'). Uses config default if not set."));
+    properties.insert("timeout_ms".to_string(), json!({
+        "type": "integer",
+        "description": "Timeout in milliseconds for initial output. Command continues in background if exceeded. Default 1000ms.",
+        "default": 1000,
+        "optional": true
+    }));
+    properties.insert("shell".to_string(), json!({
+        "type": "string",
+        "description": "Specific shell to use (e.g., 'bash', 'powershell'). Uses server's default shell if not set.",
+        "optional": true
+    }));
     ToolInputSchema::new(vec!["command".to_string()], Some(properties))
 }
 
 pub fn read_output_schema() -> ToolInputSchema {
     let mut properties = HashMap::new();
-    properties.insert("session_id".to_string(), create_prop("string", "ID of the command session."));
+    properties.insert("session_id".to_string(), create_prop("string", "ID of the command session obtained from execute_command."));
     ToolInputSchema::new(vec!["session_id".to_string()], Some(properties))
 }
 
@@ -161,15 +211,22 @@ pub fn force_terminate_schema() -> ToolInputSchema {
 }
 
 pub fn list_sessions_schema() -> ToolInputSchema {
-    ToolInputSchema::new(vec![], None)
+    ToolInputSchema::new(vec![], None) // No arguments
 }
 
 pub fn list_processes_schema() -> ToolInputSchema {
-    ToolInputSchema::new(vec![], None)
+    ToolInputSchema::new(vec![], None) // No arguments
 }
 
 pub fn kill_process_schema() -> ToolInputSchema {
     let mut properties = HashMap::new();
-    properties.insert("pid".to_string(), create_prop("integer", "Process ID (PID) to terminate."));
+    properties.insert("pid".to_string(), create_prop("integer", "Process ID (PID) to terminate.")); // Should be integer
     ToolInputSchema::new(vec!["pid".to_string()], Some(properties))
+}
+
+// Schema for set_config_value (used in handler.rs)
+#[derive(Debug, Deserialize)]
+pub struct SetConfigValueParams {
+    pub key: String,
+    pub value: Value, // Keep as serde_json::Value for flexibility
 }

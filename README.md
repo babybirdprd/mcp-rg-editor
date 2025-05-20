@@ -1,51 +1,58 @@
-# MCP Enhanced Server (mcp-rg-editor)
+# Desktop Commander Enhanced (Rust MCP Server)
 
-This is a powerful MCP (Model Context Protocol) server built in Rust, extending the capabilities of the original [`randomm/mcp-rg`](https://github.com/randomm/mcp-rg). It provides AI models like Anthropic's Claude with a comprehensive suite of tools to interact with a local system, including. Heavily inspired by the excellent [Desktop Commander MCP server](https://github.com/wonderwhy-er/DesktopCommanderMCP), which pioneered many of the concepts and tools extended here:
+This is a powerful MCP (Model Context Protocol) server built in Rust, significantly extending the capabilities of the original `randomm/mcp-rg` and heavily inspired by the feature set of the Node.js-based [Desktop Commander MCP](https://github.com/wonderwhy-er/DesktopCommanderMCP). It provides AI models like Anthropic's Claude with a comprehensive suite of tools to interact with a local system, including:
 
--   **Code Search:** Efficient code search using Ripgrep (`rg`).
--   **Filesystem Operations:** Read, write, list, move files and directories.
--   **Terminal Command Execution:** Run commands, manage sessions, and stream output.
+-   **Advanced Code Search:** Efficient code search using Ripgrep (`rg`).
+-   **Full Filesystem Operations:** Read, write, list, move files and directories, with support for URL reading and image handling.
+-   **Robust Terminal Command Execution:** Run commands with timeouts, manage background sessions, stream output, and select shells.
 -   **Process Management:** List and terminate system processes.
--   **Text Editing:** Perform targeted text replacements in files.
--   **Configuration Management:** View and (soon) modify server settings.
+-   **Surgical Text Editing:** Perform targeted text replacements in files with fuzzy matching feedback and line ending preservation.
+-   **Configuration Management:** View and (in-memory) modify server settings via MCP tools.
 
 The server supports both **STDIO** and **Server-Sent Events (SSE)** transport protocols.
 
 ## Features
 
--   **Ripgrep Integration (`search_code`):**
-    -   Fast regex and literal string search.
-    -   Path and file-type filtering.
-    -   Context lines, line numbers, case sensitivity options.
--   **Filesystem Tools:**
-    -   `read_file`: Read file content with line-based offset and length.
-    -   `write_file`: Write or append content, respecting line limits (requires chunking for large writes).
+-   **Execute terminal commands** with output streaming (`execute_command`, `read_output`).
+-   **Command timeout** and **background execution** support.
+-   **Process management** (`list_processes`, `kill_process`).
+-   **Session management** for long-running commands (`list_sessions`, `force_terminate`).
+-   **Server configuration management** (in-memory via MCP tools):
+    -   `get_config`: View current settings (FILES_ROOT, ALLOWED_DIRECTORIES, BLOCKED_COMMANDS, etc.).
+    -   `set_config_value`: Modify settings like `allowedDirectories`, `blockedCommands`, `defaultShell` for the current session.
+-   **Full filesystem operations:**
+    -   `read_file`: Read local files (with line offset/length for text) or content from URLs. Handles text and common image types (PNG, JPEG, GIF, WebP displayed as images).
+    -   `read_multiple_files`: Read multiple local files simultaneously.
+    -   `write_file`: Write or append to files, respecting `fileWriteLineLimit` (requires chunking for large writes).
     -   `create_directory`: Create directories, including nested ones.
-    -   `list_directory`: List files and subdirectories.
+    -   `list_directory`: List files and subdirectories with `[FILE]` / `[DIR]` prefixes.
     -   `move_file`: Move or rename files/directories.
-    -   `search_files`: Simple search for files/directories by name (substring match).
-    -   `get_file_info`: Retrieve metadata like size, timestamps, permissions.
--   **Terminal Tools:**
-    -   `execute_command`: Execute shell commands with configurable timeout and shell. Supports background execution.
-    -   `read_output`: Stream output from ongoing commands.
-    -   `force_terminate`: Kill a running command session.
-    -   `list_sessions`: List active command sessions.
--   **Process Tools:**
-    -   `list_processes`: List system processes with PID, name, CPU/memory usage.
-    -   `kill_process`: Terminate a system process by PID.
--   **Editing Tools:**
-    -   `edit_block`: Replace exact occurrences of a string in a file. Supports `expected_replacements` parameter.
--   **Configuration Tools:**
-    -   `get_config`: View current server configuration (FILES_ROOT, ALLOWED_DIRECTORIES, etc.).
-    -   `set_config_value`: (Planned) Modify server configuration dynamically. Currently, config is via environment variables.
+    -   `search_files`: Find files/directories by name (case-insensitive substring match) with configurable timeout.
+    -   `get_file_info`: Retrieve metadata like size, timestamps, permissions (octal on Unix).
+-   **Code editing capabilities (`edit_block`):**
+    -   Surgical text replacements.
+    -   `expected_replacements` parameter to control number of changes.
+    -   Fuzzy search fallback with character-level diff feedback (`{-removed-}{+added+}`) when exact match fails.
+    -   Automatic line ending detection and preservation.
+    -   Logging of fuzzy search attempts for analysis.
+-   **Advanced Code Search (`search_code` via Ripgrep):**
+    -   Fast regex and literal string search.
+    -   Path, glob, and file-type filtering.
+    -   Context lines, line numbers, case sensitivity options.
+    -   Configurable timeout.
 -   **Security:**
     -   `FILES_ROOT`: All operations are confined within this root directory.
-    -   `ALLOWED_DIRECTORIES`: Fine-grained access control for filesystem tools.
-    -   `BLOCKED_COMMANDS`: Prevent execution of potentially harmful commands.
-    -   Path traversal prevention.
+    -   `ALLOWED_DIRECTORIES`: Fine-grained access control for filesystem tools. Supports tilde (`~`) expansion. An empty list defaults to `FILES_ROOT`. `/` or `C:\` grants full (dangerous) access.
+    -   `BLOCKED_COMMANDS`: Prevent execution of potentially harmful commands (checks first word of command).
+    -   Path traversal prevention and tilde (`~`) expansion for user convenience.
 -   **Dual Transport:**
     -   STDIO: For local integration (e.g., Claude Desktop, CLI tools).
-    -   SSE (HTTP): For network-based access, allowing multiple clients. (Requires `sse` feature).
+    -   SSE (HTTP): For network-based access. (Requires `sse` feature).
+-   **Comprehensive Audit Logging:**
+    -   All tool calls are logged with timestamp, tool name, and sanitized arguments.
+    -   Log rotation based on size.
+-   **Fuzzy Search Logging:**
+    -   Detailed logs for `edit_block` fuzzy search attempts, aiding in debugging failed edits.
 
 ## Prerequisites
 
@@ -57,7 +64,7 @@ The server supports both **STDIO** and **Server-Sent Events (SSE)** transport pr
 
 1.  **Clone the repository:**
     ```bash
-    git clone <repository_url>
+    git clone <repository_url> # Replace with the actual URL
     cd mcp-rg-editor
     ```
 
@@ -78,16 +85,18 @@ Configuration is managed via environment variables. Create a `.env` file in the 
 
 **Key Environment Variables:**
 
--   `FILES_ROOT`: (Required) Absolute path to the root directory the server can operate within.
--   `ALLOWED_DIRECTORIES`: Comma-separated list of absolute paths the server can access. Defaults to `FILES_ROOT`. For full filesystem access (DANGEROUS), set to `/` (Linux/macOS) or `C:\` (Windows - though be mindful of drive letters).
--   `BLOCKED_COMMANDS`: Comma-separated list of command names (e.g., `rm,sudo`) to block.
+-   `FILES_ROOT`: (Required) Absolute path to the root directory the server can operate within. Supports `~` for home directory.
+-   `ALLOWED_DIRECTORIES`: Comma-separated list of absolute paths or tilde-expanded paths. If empty, defaults to `FILES_ROOT`. For full filesystem access (DANGEROUS), set to `/` (Linux/macOS) or a drive letter like `C:\` (Windows).
+-   `BLOCKED_COMMANDS`: Comma-separated list of command names (e.g., `rm,sudo`) to block. Default list includes many destructive commands.
 -   `DEFAULT_SHELL`: Shell for `execute_command` (e.g., `bash`, `powershell`). System default if not set.
 -   `LOG_LEVEL`: `trace`, `debug`, `info`, `warn`, `error`. Default: `info`.
 -   `MCP_TRANSPORT`: `stdio` (default) or `sse`.
 -   `MCP_SSE_HOST`: Host for SSE (e.g., `0.0.0.0`). Default: `127.0.0.1`.
 -   `MCP_SSE_PORT`: Port for SSE (e.g., `3000`). Default: `3000`.
--   `FILE_READ_LINE_LIMIT`: Max lines for `read_file`. Default: `1000`.
+-   `FILE_READ_LINE_LIMIT`: Max lines for `read_file` (local text files). Default: `1000`.
 -   `FILE_WRITE_LINE_LIMIT`: Max lines for `write_file` per call. Default: `50`.
+-   `AUDIT_LOG_MAX_SIZE_MB`: Max size for audit log before rotation. Default: `10`.
+-   `MCP_LOG_DIR`: Directory for audit and fuzzy search logs. Defaults to `$FILES_ROOT/.mcp-logs`. Supports `~`.
 
 ## Running the Server
 
@@ -95,8 +104,8 @@ Configuration is managed via environment variables. Create a `.env` file in the 
 
 ```bash
 # Set environment variables (or use a .env file)
-export FILES_ROOT=/path/to/your/projects
-export ALLOWED_DIRECTORIES=/path/to/your/projects/project_a,/path/to/your/projects/project_b
+export FILES_ROOT=~/my_projects
+export ALLOWED_DIRECTORIES="~/my_projects/project_a,~/my_projects/project_b"
 # ... other env vars
 
 ./target/release/mcp-rg-editor
@@ -108,8 +117,7 @@ The server will listen for JSON-RPC messages on STDIN and send responses to STDO
 Ensure the `sse` feature was included during build.
 
 ```bash
-# Set environment variables
-export FILES_ROOT=/path/to/your/projects
+export FILES_ROOT=~/my_projects
 export MCP_TRANSPORT=sse
 export MCP_SSE_HOST=0.0.0.0 # Listen on all interfaces
 export MCP_SSE_PORT=8080
@@ -128,44 +136,24 @@ A `Dockerfile` and `docker-compose.yml` are provided.
     docker build -t mcp-rg-editor .
     ```
 
-2.  **Run with `docker run`:**
-
-    *   **STDIO Mode:**
-        ```bash
-        docker run -i --rm \
-          -v /path/on/host/projects:/app/files \
-          -e FILES_ROOT=/app/files \
-          -e ALLOWED_DIRECTORIES=/app/files \
-          -e MCP_TRANSPORT=stdio \
-          mcp-rg-editor
-        ```
-        The `-i` flag is crucial for STDIO.
-
-    *   **SSE Mode:**
-        ```bash
-        docker run -d --rm \
-          -p 8080:3000 \
-          -v /path/on/host/projects:/app/files \
-          -e FILES_ROOT=/app/files \
-          -e ALLOWED_DIRECTORIES=/app/files \
-          -e MCP_TRANSPORT=sse \
-          -e MCP_SSE_HOST=0.0.0.0 \
-          -e MCP_SSE_PORT=3000 \
-          --name mcp-server \
-          mcp-rg-editor
-        ```
-        This maps container port 3000 to host port 8080.
+2.  **Run with `docker run` (STDIO Example):**
+    ```bash
+    docker run -i --rm \
+      -v /path/on/host/projects:/app/files \
+      -e FILES_ROOT=/app/files \
+      -e ALLOWED_DIRECTORIES=/app/files \
+      -e MCP_TRANSPORT=stdio \
+      mcp-rg-editor
+    ```
 
 3.  **Run with `docker-compose`:**
-    Modify `docker-compose.yml` to set your desired volume mounts and environment variables.
+    Modify `docker-compose.yml` for volumes and environment variables.
     ```bash
-    docker-compose up -d # For detached mode
-    # For STDIO mode, you might need: docker-compose run --rm mcp-server (ensure tty:false and stdin_open:true)
+    docker-compose up -d # For SSE mode in detached
+    # For STDIO: docker-compose run --rm mcp-server (ensure tty:false, stdin_open:true in yml)
     ```
 
 ## MCP Client Setup (e.g., Claude Desktop)
-
-Refer to the `claude_desktop_config.json` examples below.
 
 ### STDIO Example (Claude Desktop)
 
@@ -173,15 +161,15 @@ Replace `/abs/path/to/mcp-rg-editor` and paths for `FILES_ROOT`, `ALLOWED_DIRECT
 ```json
 {
   "mcpServers": {
-    "desktop_enhanced": {
+    "desktop_commander_rust": {
       "command": "/abs/path/to/mcp-rg-editor/target/release/mcp-rg-editor",
       "env": {
-        "FILES_ROOT": "/home/user/my_code",
-        "ALLOWED_DIRECTORIES": "/home/user/my_code/project1,/home/user/my_code/project2",
-        "BLOCKED_COMMANDS": "sudo,rm",
+        "FILES_ROOT": "~/.my_code_root", // Example using tilde
+        "ALLOWED_DIRECTORIES": "~/.my_code_root/project1,~/.my_code_root/project2",
+        "BLOCKED_COMMANDS": "sudo,rm,mkfs", // Customize as needed
         "LOG_LEVEL": "info",
         "MCP_TRANSPORT": "stdio",
-        "RUST_LOG": "info", // For tracing subscriber
+        "RUST_LOG": "info,mcp_rg_editor=debug", // More specific logging
         "RUST_BACKTRACE": "1"
       }
     }
@@ -189,79 +177,73 @@ Replace `/abs/path/to/mcp-rg-editor` and paths for `FILES_ROOT`, `ALLOWED_DIRECT
 }
 ```
 
-### SSE Example (Conceptual - Claude Desktop doesn't directly support HTTP MCPs yet)
-
-If a client supports HTTP/SSE MCPs, you would point it to `http://<MCP_SSE_HOST>:<MCP_SSE_PORT>/mcp`.
-For Claude Desktop to use an SSE server, you'd typically need a local proxy that converts Claude Desktop's STDIO expectation into an HTTP request to your SSE server. This is an advanced setup.
-
-### Docker with STDIO (Claude Desktop)
-
-```json
-{
-  "mcpServers": {
-    "desktop_enhanced_docker": {
-      "command": "docker",
-      "args": [
-        "run", "-i", "--rm",
-        "-v", "/path/on/host/projects:/app/files",
-        "-e", "FILES_ROOT=/app/files",
-        "-e", "ALLOWED_DIRECTORIES=/app/files", // Adjust as needed inside container
-        "-e", "LOG_LEVEL=debug",
-        "-e", "RUST_LOG=debug",
-        "-e", "MCP_TRANSPORT=stdio",
-        "mcp-rg-editor:latest" // Your built image name
-      ]
-    }
-  }
-}
-```
-
 ## Available Tools
-
-*(A brief summary of tools will be listed here, similar to Desktop Commander's README)*
 
 | Category        | Tool                | Description                                                                 |
 |-----------------|---------------------|-----------------------------------------------------------------------------|
-| **Configuration**| `get_config`        | Get current server configuration.                                           |
-|                 | `set_config_value`  | (Planned) Set a server configuration value.                                 |
-| **Filesystem**  | `read_file`         | Read file content with line offset/length.                                  |
-|                 | `write_file`        | Write/append to files, respects line limits.                                |
-|                 | `create_directory`  | Create directories.                                                         |
-|                 | `list_directory`    | List directory contents.                                                    |
+| **Configuration**| `get_config`        | Get current server configuration (FILES_ROOT, allowed dirs, etc.).          |
+|                 | `set_config_value`  | Set a server configuration value in-memory (e.g., `allowedDirectories`).      |
+| **Filesystem**  | `read_file`         | Read local file (line offset/length for text) or URL. Handles images.       |
+|                 | `read_multiple_files`| Read multiple local files. Handles images.                                 |
+|                 | `write_file`        | Write/append to files, respects `fileWriteLineLimit`. Chunk large writes.   |
+|                 | `create_directory`  | Create directories, including nested ones.                                  |
+|                 | `list_directory`    | List directory contents with `[FILE]` / `[DIR]` prefixes.                   |
 |                 | `move_file`         | Move/rename files or directories.                                           |
-|                 | `search_files`      | Find files by name (substring match).                                       |
-|                 | `get_file_info`     | Get file/directory metadata.                                                |
-| **Code Search** | `search_code`       | Search code with Ripgrep (regex, file types, context).                      |
-| **Text Editing**| `edit_block`        | Replace exact string occurrences in a file.                                 |
-| **Terminal**    | `execute_command`   | Run terminal commands, with timeout and background execution.                 |
-|                 | `read_output`       | Get new output from a running command.                                      |
-|                 | `force_terminate`   | Stop a running command session.                                             |
-|                 | `list_sessions`     | List active command sessions.                                               |
-| **Process**     | `list_processes`    | List system processes.                                                      |
-|                 | `kill_process`      | Terminate a process by PID.                                                 |
+|                 | `search_files`      | Find files/dirs by name (case-insensitive substring) with timeout.          |
+|                 | `get_file_info`     | Get file/dir metadata (size, timestamps, permissions).                      |
+| **Code Search** | `search_code`       | Search code with Ripgrep (regex, globs, context, hidden, timeout).          |
+| **Text Editing**| `edit_block`        | Replace text. `expected_replacements`. Fuzzy feedback if exact match fails. |
+| **Terminal**    | `execute_command`   | Run terminal commands; timeout, background exec, shell choice.                |
+|                 | `read_output`       | Get new output from a running command session by `session_id`.              |
+|                 | `force_terminate`   | Stop a running command session by `session_id`.                             |
+|                 | `list_sessions`     | List active command sessions (ID, command, PID, runtime).                   |
+| **Process**     | `list_processes`    | List system processes (PID, name, CPU/mem, command, status).                |
+|                 | `kill_process`      | Terminate a system process by PID.                                          |
+
+### `edit_block` Usage
+
+The `edit_block` tool is powerful but requires careful usage:
+-   **Small, focused edits:** Prefer multiple small `edit_block` calls over one large one.
+-   **Context is key:** For `old_string`, include enough surrounding context (1-3 lines typically) to make it unique if `expected_replacements` is 1.
+-   **`expected_replacements`:**
+    -   Default `1`: Replaces the first exact match. If more than one found, it errors.
+    -   Set to `N`: Replaces exactly `N` occurrences. Errors if a different number is found.
+    -   Set to `0`: Replaces *all* exact occurrences. Use with caution.
+-   **Fuzzy Fallback:** If an exact match for `old_string` fails, the tool attempts a fuzzy search.
+    -   If a close match (>=70% similarity by default) is found, it returns a diff: `common_prefix{-removed-}{+added+}common_suffix`. **It does not automatically apply the fuzzy match.** You must then call `edit_block` again with the *exact* text from the file (as shown in the `-removed-` part of the diff) as your new `old_string`.
+    -   Details of fuzzy attempts are logged to `$FILES_ROOT/.mcp-logs/fuzzy-search.log`.
+
+### Handling Long-Running Commands
+
+1.  `execute_command` returns after `timeout_ms` (default 1s) with initial output.
+2.  If the command didn't finish, it continues in the background. The result includes a `session_id` and `timed_out: true`.
+3.  Use `read_output` with the `session_id` to get new output.
+4.  Use `force_terminate` with `session_id` to stop it if needed.
+5.  `list_sessions` shows all backgrounded commands.
 
 ## Security
 
--   **`FILES_ROOT`**: Enforces a top-level boundary.
--   **`ALLOWED_DIRECTORIES`**: Provides more granular control. Paths outside these (but within `FILES_ROOT`) are inaccessible to filesystem tools.
--   **`BLOCKED_COMMANDS`**: Prevents execution of specified commands. Uses regex for matching the command itself (first word).
--   Path canonicalization and validation are used to prevent traversal attacks.
--   Run the server with the least privileges necessary.
--   When using Docker, mount only necessary host directories.
+-   **`FILES_ROOT`**: The primary jail. All local file/command operations are confined within this directory.
+-   **`ALLOWED_DIRECTORIES`**: A list of comma-separated, absolute, or tilde-expanded paths. Filesystem tools can only operate within these directories (which must also be under `FILES_ROOT`, unless `FILES_ROOT` itself is very broad like `/`). An empty list defaults to only `FILES_ROOT`. Setting this to `/` (Unix) or `C:\` (Windows) grants full filesystem access *within the scope of what `FILES_ROOT` allows* and is dangerous.
+-   **`BLOCKED_COMMANDS`**: Prevents execution of specified commands (e.g., `rm`, `sudo`). Matches the first word of a command.
+-   Path canonicalization and validation are used to prevent traversal attacks (e.g., `../../`).
+-   Tilde (`~`) expansion is supported for convenience in path parameters.
+-   **Terminal commands can still access files outside `ALLOWED_DIRECTORIES` if `FILES_ROOT` is permissive.** The `ALLOWED_DIRECTORIES` setting primarily restricts the *filesystem tools* (`read_file`, `write_file`, etc.), not the general terminal. True terminal sandboxing is a more complex OS-level feature not implemented here.
 
 ## Troubleshooting
 
--   Check `LOG_LEVEL` and `RUST_LOG` for detailed server logs (sent to STDERR).
--   Ensure `rg` is installed for `search_code`.
--   Verify `FILES_ROOT` and `ALLOWED_DIRECTORIES` are absolute paths and exist.
+-   Set `LOG_LEVEL=debug` (or `trace`) and `RUST_LOG=mcp_rg_editor=debug` (or `trace`) for detailed server logs (sent to STDERR).
+-   Ensure `rg` (ripgrep) is installed and in PATH for `search_code`.
+-   Verify `FILES_ROOT` is an absolute path and exists. `ALLOWED_DIRECTORIES` paths must also be absolute or tilde-expanded and exist (or their parents must exist if they are targets for creation).
 -   For Docker STDIO: ensure `-i` flag is used with `docker run`.
 -   For Docker SSE: ensure ports are correctly mapped (`-p host:container`).
+-   Check logs in `$FILES_ROOT/.mcp-logs/` (or `$MCP_LOG_DIR` if set) for audit and fuzzy search details.
 
 ## Development
 
 -   Format code: `cargo fmt`
 -   Lint code: `cargo clippy --features "stdio,sse"`
--   Run tests: `cargo test --features "stdio,sse"` (Test suite needs to be expanded)
+-   Run tests: `cargo test --features "stdio,sse"` (see `tests/README.md`)
 
 ## Contributing
 
@@ -269,4 +251,4 @@ Contributions are welcome! Please fork the repository, create a feature branch, 
 
 ## License
 
-This project is licensed under the MIT License. See `LICENSE` file (if one was provided in `randomm/mcp-rg`, otherwise assume MIT as per its README).
+This project is licensed under the MIT License.

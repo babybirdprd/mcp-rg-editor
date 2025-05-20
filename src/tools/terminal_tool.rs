@@ -2,19 +2,20 @@ use crate::config::Config;
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::process::Stdio as StdProcessStdio;
+use std::sync::{Arc, Mutex as StdMutex}; // Using std::sync::Mutex for cross-thread sharing
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command as TokioCommand};
 use tokio::sync::Notify;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, info, warn, instrument};
 use uuid::Uuid;
-use regex::Regex;
+use regex::Regex; // Already imported
 
 #[derive(Debug, Deserialize)]
 pub struct ExecuteCommandParams {
     pub command: String,
+    #[serde(rename = "timeout_ms")]
     pub timeout_ms: Option<u64>,
     pub shell: Option<String>, // e.g. "bash", "powershell"
 }
@@ -34,8 +35,9 @@ pub struct ExecuteCommandResult {
     pub session_id: String,
     pub pid: Option<u32>,
     pub initial_output: String,
-    pub timed_out: bool,
-    pub exit_code: Option<i32>,
+    pub timed_out: bool, // True if command exceeded initial timeout_ms and is running in background
+    pub exit_code: Option<i32>, // Present if command finished within timeout_ms
+    pub message: String, // General status message
 }
 
 #[derive(Debug, Serialize)]
@@ -60,53 +62,65 @@ pub struct SessionInfo {
     pub pid: Option<u32>,
     pub is_running: bool,
     pub start_time_iso: String,
+    pub runtime_ms: u128,
 }
 
 struct ActiveSession {
-    child: Child,
+    child: Arc<StdMutex<Option<Child>>>, // Child needs to be mutable for kill, Option for take
     command: String,
-    output_buffer: Arc<Mutex<Vec<String>>>,
-    is_finished: Arc<Notify>,
-    exit_code: Arc<Mutex<Option<i32>>>,
-    start_time: std::time::SystemTime,
+    output_buffer: Arc<StdMutex<Vec<String>>>, // StdMutex for Vec
+    is_finished_notify: Arc<Notify>, // Tokio's Notify
+    exit_code: Arc<StdMutex<Option<i32>>>, // StdMutex for Option<i32>
+    start_time: std::time::Instant,
+    session_id: String, // Store session_id for logging within the task
+    pid: Option<u32>, // Store PID for logging
 }
 
 #[derive(Debug)]
 pub struct TerminalManager {
     config: Arc<Config>,
-    sessions: Arc<Mutex<HashMap<String, Arc<ActiveSession>>>>,
+    sessions: Arc<StdMutex<HashMap<String, Arc<ActiveSession>>>>,
 }
 
 impl TerminalManager {
     pub fn new(config: Arc<Config>) -> Self {
         Self {
             config,
-            sessions: Arc::new(Mutex::new(HashMap::new())),
+            sessions: Arc::new(StdMutex::new(HashMap::new())),
         }
     }
 
     fn is_command_blocked(&self, command_str: &str) -> bool {
-        let first_word = command_str.split_whitespace().next().unwrap_or("");
-        self.config.blocked_commands.iter().any(|regex| regex.is_match(first_word))
+        // Extract the base command (first word, ignoring leading env vars)
+        let effective_command = command_str
+            .trim_start()
+            .split_whitespace()
+            .find(|s| !s.contains('=')) // Skip KEY=value parts
+            .unwrap_or("");
+
+        self.config.blocked_commands.iter().any(|regex| {
+            regex.is_match(effective_command)
+        })
     }
 
     #[instrument(skip(self, params), fields(command = %params.command))]
     pub async fn execute_command(&self, params: &ExecuteCommandParams) -> Result<ExecuteCommandResult, AppError> {
         if self.is_command_blocked(¶ms.command) {
+            warn!(command = %params.command, "Command execution blocked");
             return Err(AppError::CommandBlocked(params.command.clone()));
         }
 
         let session_id = Uuid::new_v4().to_string();
-        let shell_cmd = params.shell.as_ref().or(self.config.default_shell.as_ref());
+        let shell_to_use = params.shell.as_ref().or(self.config.default_shell.as_ref());
         
-        let mut command = if let Some(shell) = shell_cmd {
-            let mut cmd = TokioCommand::new(shell);
-            if shell.contains("powershell") || shell.contains("cmd.exe") {
-                 cmd.arg("/c");
-            } else {
+        let mut command_process = if let Some(shell_path) = shell_to_use {
+            let mut cmd = TokioCommand::new(shell_path);
+            if shell_path.contains("powershell") || shell_path.contains("cmd.exe") {
+                 cmd.arg("-Command"); // Or /c for cmd.exe
+            } else { // Assuming sh-like shell
                  cmd.arg("-c");
             }
-            cmd.arg(¶ms.command);
+            cmd.arg(¶ms.command.clone()); // Pass the whole command string to the shell
             cmd
         } else {
             // Basic parsing for direct execution if no shell specified
@@ -117,199 +131,221 @@ impl TerminalManager {
             cmd
         };
 
-        command.current_dir(&self.config.files_root); // Execute in files_root
-        command.stdin(Stdio::null());
-        command.stdout(Stdio::piped());
-        command.stderr(Stdio::piped());
+        command_process.current_dir(&self.config.files_root); 
+        command_process.stdin(StdProcessStdio::null());
+        command_process.stdout(StdProcessStdio::piped());
+        command_process.stderr(StdProcessStdio::piped());
 
-        debug!("Spawning command: {:?}", command);
-        let mut child = command.spawn().map_err(|e| {
+        debug!(shell = ?shell_to_use, command = %params.command, "Spawning command");
+        
+        let child_instance = command_process.spawn().map_err(|e| {
+            error!(error = %e, command = %params.command, "Failed to spawn command");
             AppError::CommandExecutionError(format!("Failed to spawn command '{}': {}", params.command, e))
         })?;
-
-        let pid = child.id();
-        let output_buffer = Arc::new(Mutex::new(Vec::new()));
-        let is_finished = Arc::new(Notify::new());
-        let exit_code_arc = Arc::new(Mutex::new(None::<i32>));
         
-        let session = Arc::new(ActiveSession {
-            child, // child is moved here
-            command: params.command.clone(),
-            output_buffer: output_buffer.clone(),
-            is_finished: is_finished.clone(),
-            exit_code: exit_code_arc.clone(),
-            start_time: std::time::SystemTime::now(),
+        let pid = child_instance.id();
+        let command_str_clone = params.command.clone(); // Clone for the task
+
+        let active_session = Arc::new(ActiveSession {
+            child: Arc::new(StdMutex::new(Some(child_instance))), // Wrap child in Option and Mutex
+            command: command_str_clone.clone(),
+            output_buffer: Arc::new(StdMutex::new(Vec::new())),
+            is_finished_notify: Arc::new(Notify::new()),
+            exit_code: Arc::new(StdMutex::new(None::<i32>)),
+            start_time: std::time::Instant::now(),
+            session_id: session_id.clone(),
+            pid,
         });
         
-        self.sessions.lock().unwrap().insert(session_id.clone(), session.clone());
-
-        let stdout = session.child.stdout.take().expect("Failed to capture stdout");
-        let stderr = session.child.stderr.take().expect("Failed to capture stderr");
-
-        let output_buffer_clone1 = output_buffer.clone();
+        self.sessions.lock().unwrap().insert(session_id.clone(), active_session.clone());
+        
+        // Spawn a task to manage the child process's lifecycle and output
+        let session_clone_for_task = active_session.clone();
         tokio::spawn(async move {
-            let mut reader = BufReader::new(stdout).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                output_buffer_clone1.lock().unwrap().push(line);
+            let mut child_opt = session_clone_for_task.child.lock().unwrap().take(); // Take ownership of child
+            if let Some(mut child_process) = child_opt {
+                let stdout = child_process.stdout.take().expect("Failed to capture stdout from child");
+                let stderr = child_process.stderr.take().expect("Failed to capture stderr from child");
+
+                let stdout_buffer_clone = session_clone_for_task.output_buffer.clone();
+                let stderr_buffer_clone = session_clone_for_task.output_buffer.clone(); // Log both to same buffer
+
+                let stdout_task = tokio::spawn(async move {
+                    let mut reader = BufReader::new(stdout).lines();
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        stdout_buffer_clone.lock().unwrap().push(format!("[stdout] {}", line));
+                    }
+                });
+
+                let stderr_task = tokio::spawn(async move {
+                    let mut reader = BufReader::new(stderr).lines();
+                    while let Ok(Some(line)) = reader.next_line().await {
+                        stderr_buffer_clone.lock().unwrap().push(format!("[stderr] {}", line));
+                    }
+                });
+                
+                let status_result = child_process.wait().await;
+                
+                // Ensure output tasks complete
+                let _ = tokio::join!(stdout_task, stderr_task);
+
+                match status_result {
+                    Ok(status) => {
+                        *session_clone_for_task.exit_code.lock().unwrap() = status.code();
+                        info!(command = %session_clone_for_task.command, pid = ?session_clone_for_task.pid, sid = %session_clone_for_task.session_id, exit_code = ?status.code(), "Command finished");
+                    }
+                    Err(e) => {
+                        warn!(command = %session_clone_for_task.command, pid = ?session_clone_for_task.pid, sid = %session_clone_for_task.session_id, error = %e, "Failed to wait for command");
+                        // Store a generic error code if wait fails
+                        *session_clone_for_task.exit_code.lock().unwrap() = Some(-1); 
+                    }
+                }
+                session_clone_for_task.is_finished_notify.notify_waiters();
+            } else {
+                 warn!(sid=%session_clone_for_task.session_id, "Child process already taken or None in monitoring task");
             }
         });
         
-        let output_buffer_clone2 = output_buffer.clone();
-        tokio::spawn(async move {
-            let mut reader = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = reader.next_line().await {
-                output_buffer_clone2.lock().unwrap().push(line);
-            }
-        });
-
-        let child_wait_task = tokio::spawn(async move {
-            match session.child.wait().await {
-                Ok(status) => {
-                    *session.exit_code.lock().unwrap() = status.code();
-                    info!("Command '{}' (PID: {:?}, SID: {}) finished with status: {:?}", 
-                          session.command, pid, session_id, status.code());
-                }
-                Err(e) => {
-                    warn!("Failed to wait for command '{}' (PID: {:?}, SID: {}): {}", 
-                          session.command, pid, session_id, e);
-                }
-            }
-            session.is_finished.notify_waiters();
-        });
+        let timeout_duration = Duration::from_millis(params.timeout_ms.unwrap_or(1000));
         
-        let timeout_duration = Duration::from_millis(params.timeout_ms.unwrap_or(1000)); // Default 1s
-        let initial_output_result = timeout(timeout_duration, async {
-            // Wait a bit for initial output or completion
-            tokio::select! {
-                _ = tokio::time::sleep(timeout_duration) => {}, // Max wait for initial output
-                _ = is_finished.notified() => {}, // Or process finished
+        let initial_output_string = match timeout(timeout_duration, active_session.is_finished_notify.notified()).await {
+            Ok(_) => { // Process finished within timeout
+                let mut buffer = active_session.output_buffer.lock().unwrap();
+                let output = buffer.join("\n");
+                buffer.clear();
+                output
             }
-            let mut buffer = output_buffer.lock().unwrap();
-            let output_lines = buffer.join("\n");
-            buffer.clear(); // Clear after reading
-            output_lines
-        }).await;
-
-        let (initial_output, timed_out) = match initial_output_result {
-            Ok(output) => (output, exit_code_arc.lock().unwrap().is_none()), // Timed out if not finished
-            Err(_) => ("".to_string(), true), // Elasped means timeout for initial output
+            Err(_) => { // Timeout elapsed, process might still be running
+                let mut buffer = active_session.output_buffer.lock().unwrap();
+                let output = buffer.join("\n");
+                buffer.clear();
+                output
+            }
         };
         
-        // If the process finished within the initial timeout, remove it.
-        // Otherwise, it keeps running in the background.
-        let final_exit_code = *exit_code_arc.lock().unwrap();
-        if final_exit_code.is_some() {
-             // Task might not be finished if we got here via is_finished.notified()
-             // but child_wait_task hasn't completed setting exit_code yet.
-             // So, we wait for child_wait_task briefly.
-            let _ = timeout(Duration::from_millis(100), child_wait_task).await;
+        let final_exit_code = *active_session.exit_code.lock().unwrap();
+        let timed_out = final_exit_code.is_none(); // If no exit code, it timed out for initial output
+
+        let message = if timed_out {
+            format!("Command started with PID {:?}, Session ID {}. Running in background.", pid, session_id)
+        } else {
+            format!("Command finished with PID {:?}, Session ID {}. Exit code: {:?}.", pid, session_id, final_exit_code)
+        };
+        
+        if !timed_out { // If finished, remove from active sessions
             self.sessions.lock().unwrap().remove(&session_id);
         }
 
         Ok(ExecuteCommandResult {
             session_id,
             pid,
-            initial_output,
+            initial_output: initial_output_string,
             timed_out,
             exit_code: final_exit_code,
+            message,
         })
     }
 
     #[instrument(skip(self, params), fields(session_id = %params.session_id))]
     pub async fn read_output(&self, params: &ReadOutputParams) -> Result<ReadOutputResult, AppError> {
-        let session_guard = self.sessions.lock().unwrap();
-        let session_arc = session_guard.get(¶ms.session_id)
-            .cloned() // Clone Arc to use outside lock
-            .ok_or_else(|| AppError::SessionNotFound(0))?; // PID 0 as placeholder
-        drop(session_guard); // Release lock
+        let session_arc = { // Scope for the lock
+            let sessions_map = self.sessions.lock().unwrap();
+            sessions_map.get(¶ms.session_id).cloned() 
+        };
 
-        let mut output_buffer = session_arc.output_buffer.lock().unwrap();
-        let new_output = output_buffer.join("\n");
-        output_buffer.clear();
-        
-        let exit_code = *session_arc.exit_code.lock().unwrap();
-        let is_running = exit_code.is_none();
+        if let Some(session_arc_unwrapped) = session_arc {
+            let mut output_buffer_guard = session_arc_unwrapped.output_buffer.lock().unwrap();
+            let new_output = output_buffer_guard.join("\n");
+            output_buffer_guard.clear();
+            
+            let exit_code_guard = session_arc_unwrapped.exit_code.lock().unwrap();
+            let exit_code = *exit_code_guard;
+            let is_running = exit_code.is_none();
 
-        if !is_running { // Process finished, remove from active sessions
-            self.sessions.lock().unwrap().remove(¶ms.session_id);
+            if !is_running { 
+                self.sessions.lock().unwrap().remove(¶ms.session_id);
+            }
+
+            Ok(ReadOutputResult {
+                session_id: params.session_id.clone(),
+                new_output,
+                is_running,
+                exit_code,
+            })
+        } else {
+            Err(AppError::SessionNotFound(params.session_id.clone()))
         }
-
-        Ok(ReadOutputResult {
-            session_id: params.session_id.clone(),
-            new_output,
-            is_running,
-            exit_code,
-        })
     }
 
     #[instrument(skip(self, params), fields(session_id = %params.session_id))]
     pub async fn force_terminate(&self, params: &ForceTerminateParams) -> Result<ForceTerminateResult, AppError> {
-        let mut sessions_map = self.sessions.lock().unwrap();
-        if let Some(session_arc) = sessions_map.get_mut(¶ms.session_id) {
-            // Child is part of ActiveSession, which is Arc'd.
-            // To call `kill`, we need `&mut Child`.
-            // This design makes direct killing hard. Child needs to be Mutex'd or use `start_kill`.
-            // For simplicity, we'll use `start_kill` which is async and doesn't require `&mut`.
-            // This is a limitation of the current Arc<ActiveSession> structure if we need immediate mutable access.
-            // A better approach might involve sending a kill signal via a channel to the task managing the child.
-            // Or, make `child` field an `Arc<Mutex<Child>>`.
-            // For now, let's try `start_kill`.
-            // Note: `child.start_kill()` is preferred over `child.kill().await` for Tokio's Child.
-            
-            // To actually kill, we need to get a mutable reference to the child,
-            // which is tricky with the current Arc<ActiveSession> setup.
-            // A common pattern is to wrap the Child itself in an Arc<Mutex<Child>>
-            // or handle termination within the task that owns the Child.
+        let session_arc = {
+            let mut sessions_map = self.sessions.lock().unwrap();
+            sessions_map.remove(¶ms.session_id) // Remove to get mutable ownership effectively
+        };
 
-            // Let's assume `ActiveSession`'s `child` field is an `Arc<Mutex<Child>>` for this example to work.
-            // Or, more simply, if `child.kill()` is available and works on a non-mutable ref (some OS specific behavior).
-            // Tokio's Child::kill() actually takes `&mut self`.
-            // So, we can't directly call it on `session_arc.child`.
-            // We must remove it from the map to get mutable ownership or change ActiveSession.
-            
-            // A simpler way for now:
-            if let Err(e) = session_arc.child.start_kill() {
-                 warn!("Failed to start_kill process for session {}: {}", params.session_id, e);
-                 return Ok(ForceTerminateResult {
+        if let Some(session_arc_unwrapped) = session_arc {
+            let mut child_guard = session_arc_unwrapped.child.lock().unwrap();
+            if let Some(child_process) = child_guard.as_mut() {
+                match child_process.start_kill() {
+                    Ok(_) => {
+                        info!(sid = %params.session_id, pid = ?session_arc_unwrapped.pid, "Termination signal sent to process");
+                        // Optionally wait a bit for the process to die
+                        let _ = timeout(Duration::from_millis(500), child_process.wait()).await;
+                        Ok(ForceTerminateResult {
+                            session_id: params.session_id.clone(),
+                            success: true,
+                            message: "Termination signal sent.".to_string(),
+                        })
+                    }
+                    Err(e) => {
+                        warn!(sid = %params.session_id, pid = ?session_arc_unwrapped.pid, error = %e, "Failed to send kill signal");
+                        // Put it back if kill failed, though it's in a weird state
+                        self.sessions.lock().unwrap().insert(params.session_id.clone(), session_arc_unwrapped);
+                        Ok(ForceTerminateResult {
+                            session_id: params.session_id.clone(),
+                            success: false,
+                            message: format!("Failed to send kill signal: {}", e),
+                        })
+                    }
+                }
+            } else {
+                // Child already taken/None, means it was likely already processed/terminated
+                 Ok(ForceTerminateResult {
                     session_id: params.session_id.clone(),
                     success: false,
-                    message: format!("Failed to send kill signal: {}", e),
-                });
+                    message: "Process already terminated or not found in session.".to_string(),
+                })
             }
-            // Wait a moment for it to terminate
-            let _ = timeout(Duration::from_secs(1), session_arc.child.wait()).await;
-
-            sessions_map.remove(¶ms.session_id); // remove after attempting to kill
-            info!("Force terminated session {}", params.session_id);
-            Ok(ForceTerminateResult {
-                session_id: params.session_id.clone(),
-                success: true,
-                message: "Termination signal sent.".to_string(),
-            })
         } else {
-            Err(AppError::SessionNotFound(0)) // PID 0 as placeholder
+            Err(AppError::SessionNotFound(params.session_id.clone()))
         }
     }
     
     #[instrument(skip(self))]
     pub async fn list_sessions(&self) -> Result<Vec<SessionInfo>, AppError> {
         let sessions_map = self.sessions.lock().unwrap();
-        let mut result = Vec::new();
-        for (id, session_arc) in sessions_map.iter() {
-            let exit_code = *session_arc.exit_code.lock().unwrap();
-            let is_running = exit_code.is_none();
-            let pid = session_arc.child.id();
-            let start_time_iso = chrono::DateTime::<chrono::Utc>::from(session_arc.start_time)
-                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let mut result_infos = Vec::new();
+        let now_instant = std::time::Instant::now();
 
-            result.push(SessionInfo {
+        for (id, session_arc) in sessions_map.iter() {
+            let exit_code_guard = session_arc.exit_code.lock().unwrap();
+            let is_running = exit_code_guard.is_none();
+            
+            let runtime_ms = now_instant.duration_since(session_arc.start_time).as_millis();
+            let start_time_system = std::time::SystemTime::UNIX_EPOCH + Duration::from_nanos(
+                session_arc.start_time.duration_since(std::time::Instant::now() - std::time::Duration::from_millis(runtime_ms as u64)).as_nanos() as u64
+            ); // Approximate system time from instant
+
+            result_infos.push(SessionInfo {
                 session_id: id.clone(),
                 command: session_arc.command.clone(),
-                pid,
+                pid: session_arc.pid,
                 is_running,
-                start_time_iso,
+                start_time_iso: chrono::DateTime::<chrono::Utc>::from(start_time_system).to_rfc3339(),
+                runtime_ms,
             });
         }
-        Ok(result)
+        Ok(result_infos)
     }
 }
