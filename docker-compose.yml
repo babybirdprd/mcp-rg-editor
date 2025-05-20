@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  mcp-server:
+    build: .
+    image: mcp-rg-editor:latest
+    stdin_open: true # Required for STDIO transport if MCP_TRANSPORT=stdio
+    tty: false       # Should be false for non-interactive STDIO
+    ports:
+      - "3000:3000" # Expose for SSE transport if MCP_TRANSPORT=sse
+    volumes:
+      # Mount your code/files directory here
+      # Example: - ./my_projects:/app/files
+      - ./test_data:/app/files # Example: map a local test_data directory
+    environment:
+      # --- REQUIRED ---
+      - FILES_ROOT=/app/files
+      # --- OPTIONAL ---
+      - ALLOWED_DIRECTORIES=/app/files # Or /app/files/project_a,/app/files/project_b
+      # - BLOCKED_COMMANDS= # Override defaults if needed
+      # - DEFAULT_SHELL=bash
+      - LOG_LEVEL=debug
+      - MCP_TRANSPORT=stdio # Change to "sse" to use SSE transport
+      # - MCP_SSE_HOST=0.0.0.0 # Already default in Dockerfile
+      # - MCP_SSE_PORT=3000   # Already default in Dockerfile
+      - RUST_LOG=${LOG_LEVEL} # For tracing subscriber
+      - RUST_BACKTRACE=1
+      - FILE_READ_LINE_LIMIT=1000
+      - FILE_WRITE_LINE_LIMIT=50
+    # healthcheck: # Example healthcheck for SSE mode
+    #   test: ["CMD", "curl", "-f", "http://localhost:3000/health"] # Assuming you add a /health endpoint for SSE
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 3
+    #   start_period: 5s

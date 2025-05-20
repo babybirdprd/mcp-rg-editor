@@ -1,0 +1,49 @@
+[package]
+name = "mcp-rg-editor"
+version = "0.2.0" # Version bump from mcp-rg
+edition = "2021"
+authors = ["AI Assistant <ai@example.com>"]
+description = "Enhanced MCP server for Ripgrep, Filesystem, Terminal, and Process operations."
+
+[dependencies]
+# MCP implementation
+rust-mcp-sdk = "0.2.4"
+rust-mcp-schema = "0.4.0"
+rust-mcp-transport = "0.2.1"
+async-trait = "0.1.88"
+
+# Core functionality
+tokio = { version = "1.37.0", features = ["full"] } # Updated tokio
+axum = { version = "0.7.5", optional = true } # For SSE transport, optional
+hyper = { version = "1.3.1", features = ["full"], optional = true } # For Axum SSE
+tower-http = { version = "0.5.2", features = ["fs", "trace", "cors"], optional = true } # For Axum SSE
+
+serde = { version = "1.0.203", features = ["derive"] } # Updated serde
+serde_json = "1.0.117" # Updated serde_json
+thiserror = "1.0.61" # Updated thiserror
+anyhow = "1.0.86" # Updated anyhow
+
+# Configuration
+dotenvy = "0.15.7"
+# config crate not used directly, using env vars primarily
+
+# Logging
+tracing = "0.1.40" # Updated tracing
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] } # Updated tracing-subscriber
+
+# Utilities
+which = "6.0.1" # Updated which
+uuid = { version = "1.8.0", features = ["v4"] } # For session IDs
+strsim = "0.11.1" # For basic string similarity in edit_tool
+sysinfo = "0.30.12" # For listing processes
+regex = "1.10.5" # For command blocking and other parsing
+
+[dev-dependencies]
+tempfile = "3.10.1" # Updated tempfile
+# mockall = "0.11.4" # Not strictly needed for this port
+# proptest = "1.2.0" # Not strictly needed for this port
+
+[features]
+default = ["stdio", "sse"]
+stdio = []
+sse = ["dep:axum", "dep:hyper", "dep:tower-http"]
