@@ -1,6 +1,6 @@
 # MCP Enhanced Server (mcp-rg-editor)
 
-This is a powerful MCP (Model Context Protocol) server built in Rust, extending the capabilities of the original `randomm/mcp-rg`. It provides AI models like Anthropic's Claude with a comprehensive suite of tools to interact with a local system, including:
+This is a powerful MCP (Model Context Protocol) server built in Rust, extending the capabilities of the original [`randomm/mcp-rg`](https://github.com/randomm/mcp-rg). It provides AI models like Anthropic's Claude with a comprehensive suite of tools to interact with a local system, including. Heavily inspired by the excellent [Desktop Commander MCP server](https://github.com/wonderwhy-er/DesktopCommanderMCP), which pioneered many of the concepts and tools extended here:
 
 -   **Code Search:** Efficient code search using Ripgrep (`rg`).
 -   **Filesystem Operations:** Read, write, list, move files and directories.
