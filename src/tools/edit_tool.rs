@@ -5,9 +5,11 @@ use crate::utils::fuzzy_search_logger::{FuzzySearchLogger, FuzzySearchLogEntry};
 use crate::utils::line_ending_handler::{detect_line_ending, normalize_line_endings, LineEndingStyle};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::{Arc, Mutex}; // Mutex for FuzzySearchLogger
+use std::sync::{Arc, Mutex as StdMutex}; // Changed to StdMutex for FuzzySearchLogger
 use tracing::{debug, instrument, warn};
 use std::time::Instant;
+use chrono::Utc; // Added for Utc::now()
+use diff; // Added for diff::chars
 
 #[derive(Debug, Deserialize)]
 pub struct EditBlockParams {
@@ -39,16 +41,16 @@ pub struct FuzzyMatchDetails {
 
 const FUZZY_SIMILARITY_THRESHOLD: f64 = 0.7;
 
-#[derive(Debug)]
+#[derive(Debug)] // Added Debug
 pub struct EditManager {
-    config: Arc<Config>,
+    config: Arc<StdRwLock<Config>>, // Changed to StdRwLock
     filesystem_manager: Arc<FilesystemManager>,
-    fuzzy_logger: Arc<Mutex<FuzzySearchLogger>>,
+    fuzzy_logger: Arc<StdMutex<FuzzySearchLogger>>,
 }
 
 impl EditManager {
-    pub fn new(config: Arc<Config>, filesystem_manager: Arc<FilesystemManager>) -> Self {
-        let fuzzy_logger = Arc::new(Mutex::new(FuzzySearchLogger::new(config.clone())));
+    pub fn new(config: Arc<StdRwLock<Config>>, filesystem_manager: Arc<FilesystemManager>) -> Self {
+        let fuzzy_logger = Arc::new(StdMutex::new(FuzzySearchLogger::new(config.clone())));
         Self { config, filesystem_manager, fuzzy_logger }
     }
 
@@ -60,15 +62,17 @@ impl EditManager {
             return Err(AppError::EditError("Search string (old_string) cannot be empty.".to_string()));
         }
 
-        let file_path_obj = Path::new(¶ms.file_path);
+        let file_path_obj = Path::new(&params.file_path); // Corrected: params.file_path
         let file_extension = file_path_obj.extension().unwrap_or_default().to_string_lossy().to_lowercase();
+        
+        let config_read_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
 
-        // Read entire file for editing. We'll handle large files by advising user to make smaller edits.
+
         let read_params = ReadFileParams {
             path: params.file_path.clone(),
             is_url: false,
             offset: 0,
-            length: Some(usize::MAX), // Read full file for editing
+            length: Some(usize::MAX),
         };
         let file_content_result = self.filesystem_manager.read_file(&read_params).await?;
         let original_content = file_content_result.text_content.ok_or_else(|| AppError::EditError("File content is not text or could not be read.".to_string()))?;
@@ -76,10 +80,9 @@ impl EditManager {
         let file_line_ending = detect_line_ending(&original_content);
         debug!(?file_line_ending, "Detected file line ending");
 
-        let normalized_old_string = normalize_line_endings(¶ms.old_string, file_line_ending);
-        let normalized_new_string = normalize_line_endings(¶ms.new_string, file_line_ending);
+        let normalized_old_string = normalize_line_endings(&params.old_string, file_line_ending); // Corrected: params.old_string
+        let normalized_new_string = normalize_line_endings(&params.new_string, file_line_ending); // Corrected: params.new_string
 
-        // --- Exact Match Logic ---
         let occurrences: Vec<_> = original_content.match_indices(&normalized_old_string).collect();
         let actual_occurrences = occurrences.len();
 
@@ -101,6 +104,24 @@ impl EditManager {
                 fuzzy_match_details: None,
             });
         }
+        
+        if params.expected_replacements == 0 && actual_occurrences > 0 {
+            debug!(count = actual_occurrences, "Expected 0 (replace all) and found occurrences. Proceeding with replacement.");
+            let new_content = original_content.replace(&normalized_old_string, &normalized_new_string);
+            let write_params = WriteFileParams {
+                path: params.file_path.clone(),
+                content: new_content,
+                mode: WriteMode::Rewrite,
+            };
+            self.filesystem_manager.write_file(&write_params).await?;
+            return Ok(EditBlockResult {
+                file_path: params.file_path.clone(),
+                replacements_made: actual_occurrences,
+                message: format!("Successfully applied {} exact replacement(s) (all occurrences).", actual_occurrences),
+                fuzzy_match_details: None,
+            });
+        }
+
 
         if actual_occurrences > 0 && params.expected_replacements > 0 && actual_occurrences != params.expected_replacements {
              return Err(AppError::EditError(format!(
@@ -109,16 +130,9 @@ impl EditManager {
             )));
         }
         
-        // If expected_replacements is 0, it means replace all occurrences if any are found.
-        // This case is now handled by the above block if actual_occurrences > 0.
-        // If actual_occurrences is 0, we proceed to fuzzy search.
-
-        // --- Fuzzy Match Logic (if no exact match or mismatch in expected count for specific replacement) ---
-        debug!("No exact match or count mismatch. Attempting fuzzy search.");
+        debug!("No exact match or count mismatch for specific replacement. Attempting fuzzy search.");
         let fuzzy_start_time = Instant::now();
         
-        // For simplicity, let's find the single best fuzzy match in the entire content.
-        // A more advanced approach might iterate or find multiple fuzzy matches.
         let (best_match_value, similarity) = find_best_fuzzy_match(&original_content, &normalized_old_string);
         let fuzzy_execution_time_ms = fuzzy_start_time.elapsed().as_secs_f64() * 1000.0;
 
@@ -127,11 +141,11 @@ impl EditManager {
 
         let log_entry = FuzzySearchLogEntry {
             timestamp: Utc::now(),
-            search_text: params.old_string.clone(), // Log original user input
+            search_text: params.old_string.clone(),
             found_text: best_match_value.clone(),
             similarity,
             execution_time_ms: fuzzy_execution_time_ms,
-            exact_match_count: actual_occurrences, // Could be 0 if no exact match at all
+            exact_match_count: actual_occurrences,
             expected_replacements: params.expected_replacements,
             fuzzy_threshold: FUZZY_SIMILARITY_THRESHOLD,
             below_threshold: similarity < FUZZY_SIMILARITY_THRESHOLD,
@@ -144,24 +158,25 @@ impl EditManager {
             diff_length: char_code_data.diff_length,
         };
         
-        // Log asynchronously
         let logger = self.fuzzy_logger.clone();
         tokio::spawn(async move {
             let mut guard = logger.lock().expect("Failed to lock fuzzy logger");
-            guard.log(&log_entry).await;
+            if let Err(e) = guard.log(&log_entry).await {
+                 tracing::error!("Failed to log fuzzy search entry: {}", e);
+            }
         });
 
         let fuzzy_details = FuzzyMatchDetails {
             similarity_percent: similarity * 100.0,
             execution_time_ms: fuzzy_execution_time_ms,
             diff_highlight: diff_highlight.clone(),
-            log_path_suggestion: self.config.fuzzy_search_log_file.display().to_string(),
+            log_path_suggestion: config_read_guard.fuzzy_search_log_file.display().to_string(),
         };
+        drop(config_read_guard);
+
 
         if similarity >= FUZZY_SIMILARITY_THRESHOLD {
             warn!(similarity, "Fuzzy match found, but not applied automatically.");
-            // Do NOT replace on fuzzy match automatically for safety.
-            // Claude should be informed to refine the `old_string` based on the diff.
             Ok(EditBlockResult {
                 file_path: params.file_path.clone(),
                 replacements_made: 0,
@@ -188,26 +203,33 @@ fn find_best_fuzzy_match(text: &str, query: &str) -> (String, f64) {
     let mut best_similarity = 0.0;
     let mut best_match_str = "";
 
-    // Sliding window approach
-    let text_len = text.chars().count();
-    let query_len = query.chars().count();
+    let text_chars: Vec<char> = text.chars().collect();
+    let query_chars: Vec<char> = query.chars().collect();
+    let text_len = text_chars.len();
+    let query_len = query_chars.len();
     
+    if query_len == 0 { return ("".to_string(), 0.0); }
+
+
     // Consider windows slightly larger and smaller than the query length
-    let min_window = std::cmp::max(1, query_len / 2);
-    let max_window = std::cmp::min(text_len, query_len + query_len / 2);
+    let min_window_len = std::cmp::max(1, query_len.saturating_sub(query_len / 4));
+    let max_window_len = std::cmp::min(text_len, query_len + query_len / 4);
 
-    for len_diff in -(query_len as isize / 4)..(query_len as isize / 4 + 1) {
-        let window_len = (query_len as isize + len_diff) as usize;
-        if window_len == 0 || window_len > text_len { continue; }
 
+    for window_len in min_window_len..=max_window_len {
+        if window_len > text_len { continue; }
         for i in 0..=(text_len - window_len) {
-            let window_str: String = text.chars().skip(i).take(window_len).collect();
-            let current_similarity = strsim::jaro_winkler(&window_str, query);
+            let end_idx = i + window_len;
+            let window_str_slice: String = text_chars[i..end_idx].iter().collect();
+            
+            let current_similarity = strsim::jaro_winkler(&window_str_slice, query);
+
             if current_similarity > best_similarity {
                 best_similarity = current_similarity;
-                best_match_str = &text[text.char_indices().nth(i).unwrap().0 .. text.char_indices().nth(i + window_len).map_or(text.len(), |(idx, _)| idx)];
+                best_match_str = &text[text.char_indices().nth(i).unwrap().0 .. text.char_indices().nth(end_idx).map_or(text.len(), |(idx, _)| idx)];
+
             }
-            if best_similarity > 0.99 { // Early exit for near perfect match
+            if best_similarity > 0.99 {
                 return (best_match_str.to_string(), best_similarity);
             }
         }
@@ -217,10 +239,10 @@ fn find_best_fuzzy_match(text: &str, query: &str) -> (String, f64) {
 
 
 fn highlight_differences(expected: &str, actual: &str) -> String {
-    let diff = diff::chars(expected, actual);
+    let diff_results = diff::chars(expected, actual);
     let mut result = String::new();
-    for d in diff {
-        match d {
+    for d_res in diff_results { // Renamed to avoid conflict
+        match d_res {
             diff::Result::Left(l) => result.push_str(&format!("{{-{}-}}", l)),
             diff::Result::Both(l, _) => result.push_str(l),
             diff::Result::Right(r) => result.push_str(&format!("{{+{}+}}", r)),
@@ -268,7 +290,7 @@ fn get_character_code_data(expected: &str, actual: &str) -> CharCodeData {
         .iter()
         .map(|(&code, &count)| {
             let char_display = std::char::from_u32(code)
-                .map(|c| if c.is_control() || c.is_whitespace() { format!("\\x{:02x}", code) } else { c.to_string() })
+                .map(|c| if c.is_control() || c.is_whitespace() && c != ' ' { format!("\\x{:02x}", code) } else { c.to_string() })
                 .unwrap_or_else(|| format!("\\u{{{:x}}}", code));
             format!("{}:{}[{}]", code, count, char_display)
         })

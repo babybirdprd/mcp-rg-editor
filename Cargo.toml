@@ -1,15 +1,15 @@
 [package]
 name = "mcp-rg-editor"
-version = "0.3.0" # Version bump to reflect significant changes
+version = "0.3.0"
 edition = "2021"
-authors = ["AI Assistant <ai@example.com>"] # Original author + AI
+authors = ["AI Assistant <ai@example.com>"]
 description = "Desktop Commander features in Rust: Ripgrep, Filesystem, Terminal, Process, and Editing MCP server."
 
 [dependencies]
 # MCP implementation
 rust-mcp-sdk = "0.2.6"
 rust-mcp-schema = "0.4.0"
-rust-mcp-transport = "0.2.3"
+rust-mcp-transport = "0.2.3" # Ensure this version aligns with rust-mcp-sdk if it has its own sse feature
 async-trait = "0.1.88"
 
 # Core functionality
@@ -28,7 +28,7 @@ dotenvy = "0.15.7"
 
 # Logging
 tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json", "fmt"] } # Added fmt for audit log
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json", "fmt"] }
 
 # Utilities
 which = "6.0.1" # For checking if rg is installed
@@ -41,13 +41,12 @@ chrono = { version = "0.4.38", features = ["serde"] } # For timestamps
 reqwest = { version = "0.12.4", features = ["json", "stream"] } # For reading from URLs
 base64 = "0.22.1" # For image handling
 mime_guess = "2.0.4" # For MIME type detection
+diff = "0.1.13" # Added for edit_tool diff highlighting
 
 [dev-dependencies]
 tempfile = "3.10.1"
-# mockall = "0.11.4" # Not strictly needed for this port
-# proptest = "1.2.0" # Not strictly needed for this port
 
 [features]
 default = ["stdio", "sse"]
 stdio = []
-sse = ["dep:axum", "dep:hyper", "dep:tower-http"]
+sse = ["dep:axum", "dep:hyper", "dep:tower-http", "rust-mcp-sdk/hyper-server"] # Ensure hyper-server feature is enabled for rust-mcp-sdk

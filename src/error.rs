@@ -5,8 +5,9 @@ pub enum AppError {
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 
+    // Removed #[from] to avoid conflict, handle explicitly or let it convert to std::io::Error
     #[error("Tokio I/O error: {0}")]
-    TokioIoError(#[from] tokio::io::Error),
+    TokioIoError(tokio::io::Error),
 
     #[error("Ripgrep error: {0}")]
     RipgrepError(String),
@@ -36,7 +37,7 @@ pub enum AppError {
     ProcessError(String),
 
     #[error("Session not found for ID: {0}")]
-    SessionNotFound(String), // Changed from u32 to String for UUIDs
+    SessionNotFound(String),
 
     #[error("Edit error: {0}")]
     EditError(String),
@@ -45,10 +46,10 @@ pub enum AppError {
     SerdeJsonError(#[from] serde_json::Error),
 
     #[error("Hyper error: {0}")]
-    HyperError(#[from] hyper::Error), // If SSE is used
+    HyperError(#[from] hyper::Error),
 
     #[error("Reqwest HTTP error: {0}")]
-    ReqwestError(#[from] reqwest::Error), // For URL reading
+    ReqwestError(#[from] reqwest::Error),
 
     #[error("Operation timed out: {0}")]
     TimeoutError(String),
@@ -57,14 +58,21 @@ pub enum AppError {
     InvalidInputArgument(String),
 }
 
-// Helper to convert AppError to CallToolError for MCP responses
 impl From<AppError> for rust_mcp_schema::schema_utils::CallToolError {
     fn from(err: AppError) -> Self {
-        // Log the full error internally for debugging before sending a potentially simplified one to Claude
         tracing::error!("AppError occurred: {:?}", err);
+        // Use a more specific error kind if possible, or Other for general.
+        // The important part is that err.to_string() becomes the message.
         rust_mcp_schema::schema_utils::CallToolError::new(std::io::Error::new(
             std::io::ErrorKind::Other,
-            err.to_string(), // This will be the message Claude sees
+            err.to_string(),
         ))
+    }
+}
+
+// If you need to convert tokio::io::Error to AppError frequently:
+impl From<tokio::io::Error> for AppError {
+    fn from(err: tokio::io::Error) -> Self {
+        AppError::TokioIoError(err)
     }
 }

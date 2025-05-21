@@ -7,16 +7,15 @@ mod utils;
 use crate::config::{Config, TransportMode};
 use crate::mcp::handler::EnhancedServerHandler;
 use anyhow::Result;
-use rust_mcp_sdk::mcp_server::{server_runtime, McpServer};
+use rust_mcp_sdk::McpServer; // Corrected trait import
 use rust_mcp_schema::{InitializeResult, Implementation, ServerCapabilities, ServerCapabilitiesTools, LATEST_PROTOCOL_VERSION};
 use rust_mcp_transport::{StdioTransport, TransportOptions};
-use std::sync::Arc;
+// Removed std::sync::Arc as it's not directly used here.
 use tracing::Level;
-use tracing_subscriber::{filter::EnvFilter, FmtSubscriber,fmt::format::FmtSpan}; // Added FmtSpan
+use tracing_subscriber::{filter::EnvFilter, FmtSubscriber, fmt::format::FmtSpan};
 
 #[cfg(feature = "sse")]
-use rust_mcp_transport_sse::{HyperServerOptions, server_runtime_sse};
-
+use rust_mcp_sdk::mcp_server::hyper_server::{create_server as create_sse_server, HyperServerOptions}; // Corrected SSE import
 
 fn setup_logging(log_level_str: &str) {
     let level = match log_level_str.to_lowercase().as_str() {
@@ -29,16 +28,16 @@ fn setup_logging(log_level_str: &str) {
     };
 
     let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("mcp_rg_editor={}", level))); // Target our crate
+        .unwrap_or_else(|_| EnvFilter::new(format!("mcp_rg_editor={}", level)));
 
     let subscriber = FmtSubscriber::builder()
         .with_env_filter(env_filter)
-        .with_target(true) 
-        .with_ansi(false) 
-        .with_writer(std::io::stderr) 
+        .with_target(true)
+        .with_ansi(false)
+        .with_writer(std::io::stderr)
         .with_level(true)
-        .with_span_events(FmtSpan::CLOSE) // Log when spans close for duration
-        .json() // JSON logs for machine readability
+        .with_span_events(FmtSpan::CLOSE)
+        .json()
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)
@@ -48,13 +47,13 @@ fn setup_logging(log_level_str: &str) {
 fn get_server_details() -> InitializeResult {
     InitializeResult {
         server_info: Implementation {
-            name: "mcp-rg-editor-desktop-commander-enhanced".to_string(), // Updated name
+            name: "mcp-rg-editor-desktop-commander-enhanced".to_string(),
             version: env!("CARGO_PKG_VERSION").to_string(),
         },
         capabilities: ServerCapabilities {
             tools: Some(ServerCapabilitiesTools { list_changed: None }),
-            resources: Some(Default::default()), // Indicate resource capability support
-            prompts: Some(Default::default()),   // Indicate prompt capability support
+            resources: Some(Default::default()),
+            prompts: Some(Default::default()),
             ..Default::default()
         },
         meta: None,
@@ -68,10 +67,8 @@ fn get_server_details() -> InitializeResult {
     }
 }
 
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Load config first to determine log paths and levels
     let initial_config = Config::load().expect("Failed to load initial configuration.");
     setup_logging(&initial_config.log_level);
 
@@ -83,15 +80,15 @@ async fn main() -> Result<()> {
     }
 
     let server_details = get_server_details();
-    // Pass the initial_config to the handler. The handler will wrap it in Arc<RwLock<Config>>.
-    let handler = EnhancedServerHandler::new(initial_config.clone()); // Clone initial_config for handler
+    let handler = EnhancedServerHandler::new(initial_config.clone());
 
-    match initial_config.transport_mode { // Use initial_config here
+    match initial_config.transport_mode {
         TransportMode::Stdio => {
             tracing::info!("Using STDIO transport mode.");
             let transport_opts = TransportOptions::default();
-            let transport = StdioTransport::new(transport_opts)?;
-            let server_runtime = server_runtime::create_server(server_details, transport, handler);
+            let transport = StdioTransport::new(transport_opts)
+                .map_err(|e| anyhow::anyhow!("Failed to create StdioTransport: {}", e))?; // Explicit error mapping
+            let server_runtime = rust_mcp_sdk::mcp_server::server_runtime::create_server(server_details, transport, handler);
             McpServer::start(&server_runtime).await?;
         }
         #[cfg(feature = "sse")]
@@ -100,10 +97,11 @@ async fn main() -> Result<()> {
             let sse_options = HyperServerOptions {
                 host: initial_config.sse_host.clone(),
                 port: initial_config.sse_port,
-                enable_cors: true, 
+                enable_cors: true,
                 ..Default::default()
             };
-            let sse_server_runtime = server_runtime_sse::create_server(server_details, handler, sse_options);
+            // Use the corrected create_sse_server function
+            let sse_server_runtime = create_sse_server(server_details, handler, sse_options);
             McpServer::start(&sse_server_runtime).await?;
         }
         #[cfg(not(feature = "sse"))]

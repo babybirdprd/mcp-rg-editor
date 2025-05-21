@@ -3,30 +3,29 @@ use crate::error::AppError;
 use crate::utils::path_utils::{validate_path_access, validate_parent_path_access};
 use crate::utils::line_ending_handler::{detect_line_ending, normalize_line_endings, LineEndingStyle};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
-use std::sync::Arc;
+// Removed std::path::PathBuf as it's not directly used here for struct fields
+use std::sync::Arc; // Keep Arc
+use std::sync::RwLock as StdRwLock; // For Config
 use tokio::fs;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader}; // Removed BufWriter as not used
 use tokio::time::timeout;
 use tracing::{debug, instrument, warn};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 
 
-// --- Schemas for parameters ---
 #[derive(Debug, Deserialize)]
 pub struct ReadFileParams {
     pub path: String,
     #[serde(default)]
     pub is_url: bool,
     #[serde(default)]
-    pub offset: usize, // Line offset for text files
-    pub length: Option<usize>, // Max lines for text files, uses config default if None
+    pub offset: usize,
+    pub length: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ReadMultipleFilesParams {
     pub paths: Vec<String>,
-    // is_url could be added per path if needed, or assume all are local for now
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,7 +63,7 @@ pub struct MoveFileParams {
 #[derive(Debug, Deserialize)]
 pub struct SearchFilesParams {
     pub path: String,
-    pub pattern: String, // Simple substring match
+    pub pattern: String,
     #[serde(rename = "timeoutMs")]
     pub timeout_ms: Option<u64>,
 }
@@ -74,14 +73,13 @@ pub struct GetFileInfoParams {
     pub path: String,
 }
 
-// --- Schemas for results ---
 #[derive(Debug, Serialize)]
 pub struct FileContent {
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub text_content: Option<String>, // For text files
+    pub text_content: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub image_data_base64: Option<String>, // For images
+    pub image_data_base64: Option<String>,
     pub mime_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lines_read: Option<usize>,
@@ -124,26 +122,25 @@ pub struct FileInfoResult {
     pub modified_iso: Option<String>,
     pub created_iso: Option<String>,
     pub accessed_iso: Option<String>,
-    pub permissions_octal: Option<String>, // e.g., "755"
+    pub permissions_octal: Option<String>,
 }
 
-// --- Filesystem Operations ---
-#[derive(Debug)]
+#[derive(Debug)] // Added Debug
 pub struct FilesystemManager {
-    config: Arc<Config>,
-    // For URL reading, we can use a shared client
+    config: Arc<StdRwLock<Config>>, // Changed to StdRwLock
     http_client: reqwest::Client,
 }
 
-const URL_FETCH_TIMEOUT_MS: u64 = 30000; // 30 seconds
-const FILE_OPERATION_TIMEOUT_MS: u64 = 30000; // 30 seconds for local file ops
+const URL_FETCH_TIMEOUT_MS: u64 = 30000;
+const FILE_OPERATION_TIMEOUT_MS: u64 = 30000;
 
 fn is_image_mime(mime_type: &str) -> bool {
-    mime_type.starts_with("image/")
+    mime_type.starts_with("image/") && 
+    (mime_type.ends_with("/png") || mime_type.ends_with("/jpeg") || mime_type.ends_with("/gif") || mime_type.ends_with("/webp"))
 }
 
 impl FilesystemManager {
-    pub fn new(config: Arc<Config>) -> Self {
+    pub fn new(config: Arc<StdRwLock<Config>>) -> Self { // Changed to StdRwLock
         Self {
             config,
             http_client: reqwest::Client::new(),
@@ -196,7 +193,7 @@ impl FilesystemManager {
                 text_content: Some(text_content),
                 image_data_base64: None,
                 mime_type,
-                lines_read: Some(lines.len()), // URLs are read fully
+                lines_read: Some(lines.len()),
                 total_lines: Some(lines.len()),
                 truncated: Some(false),
                 error: None,
@@ -207,10 +204,10 @@ impl FilesystemManager {
     #[instrument(skip(self, params), fields(path = %params.path, is_url = %params.is_url))]
     pub async fn read_file(&self, params: &ReadFileParams) -> Result<FileContent, AppError> {
         if params.is_url {
-            return self.read_file_from_url(¶ms.path).await;
+            return self.read_file_from_url(&params.path).await; // Corrected: params.path
         }
-
-        let path = validate_path_access(¶ms.path, &self.config, true)?;
+        let config_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
+        let path = validate_path_access(&params.path, &config_guard, true)?; // Corrected: params.path
         debug!(local_path = %path.display(), "Reading file from disk");
 
         let mime_type = mime_guess::from_path(&path).first_or_octet_stream().to_string();
@@ -236,23 +233,26 @@ impl FilesystemManager {
             let mut content_vec = Vec::new();
             let mut current_line_idx = 0;
             let mut total_lines_count = 0;
-            let read_limit = params.length.unwrap_or(self.config.file_read_line_limit);
+            let read_limit = params.length.unwrap_or(config_guard.file_read_line_limit);
+            drop(config_guard); // Release lock
             
-            while let Some(line_res) = lines_iter.next_line().await? {
+            while let Some(line_res) = lines_iter.next_line().await.map_err(AppError::from)? {
                 total_lines_count += 1;
                 if current_line_idx >= params.offset && content_vec.len() < read_limit {
                     content_vec.push(line_res);
                 }
                 current_line_idx += 1;
-                if content_vec.len() >= read_limit && params.offset + content_vec.len() < total_lines_count {
-                    // We've read enough lines and there are more lines available in the file
+                 // Check if we've hit the read limit AND there are more lines potentially available
+                if content_vec.len() >= read_limit && (params.offset + content_vec.len()) < total_lines_count {
                     break; 
                 }
             }
             
             let lines_read_count = content_vec.len();
             let text_content = content_vec.join("\n");
-            let is_truncated = params.offset > 0 || (lines_read_count == read_limit && params.offset + lines_read_count < total_lines_count);
+            // Truncation occurs if we started reading from an offset, or if we read up to the limit and there were more lines than what we read plus the offset.
+            let is_truncated = params.offset > 0 || (lines_read_count == read_limit && (params.offset + lines_read_count) < total_lines_count);
+
 
             Ok(FileContent {
                 path: params.path.clone(),
@@ -270,13 +270,16 @@ impl FilesystemManager {
     #[instrument(skip(self, params))]
     pub async fn read_multiple_files(&self, params: &ReadMultipleFilesParams) -> Result<Vec<FileContent>, AppError> {
         let mut results = Vec::new();
-        for path_str in ¶ms.paths {
-            // Assuming all paths are local for now. If URLs are needed, logic would need to adapt.
+        let config_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
+        let default_read_limit = config_guard.file_read_line_limit;
+        drop(config_guard); // Release lock early
+
+        for path_str in &params.paths { // Corrected: &params.paths
             let read_params = ReadFileParams {
                 path: path_str.clone(),
-                is_url: false, // Modify if URLs can be mixed
+                is_url: false, 
                 offset: 0,
-                length: Some(self.config.file_read_line_limit), // Use default limit for each
+                length: Some(default_read_limit),
             };
             match self.read_file(&read_params).await {
                 Ok(content) => results.push(content),
@@ -301,27 +304,28 @@ impl FilesystemManager {
 
     #[instrument(skip(self, params), fields(path = %params.path, mode = ?params.mode))]
     pub async fn write_file(&self, params: &WriteFileParams) -> Result<FileOperationResult, AppError> {
-        let path = validate_parent_path_access(¶ms.path, &self.config)?;
+        let config_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
+        let path = validate_parent_path_access(&params.path, &config_guard)?; // Corrected: params.path
         debug!(write_path = %path.display(), mode = ?params.mode, "Writing file");
 
         let lines: Vec<&str> = params.content.lines().collect();
-        if lines.len() > self.config.file_write_line_limit {
+        if lines.len() > config_guard.file_write_line_limit {
             return Err(AppError::EditError(format!(
                 "Content exceeds line limit of {}. Received {} lines. Please send content in smaller chunks.",
-                self.config.file_write_line_limit,
+                config_guard.file_write_line_limit,
                 lines.len()
             )));
         }
         
-        // Preserve original line endings if appending to existing file, otherwise use system default
         let final_content = if params.mode == WriteMode::Append && path.exists() {
             let existing_content_str = fs::read_to_string(&path).await.unwrap_or_default();
             let detected_ending = detect_line_ending(&existing_content_str);
-            normalize_line_endings(¶ms.content, detected_ending)
+            normalize_line_endings(&params.content, detected_ending) // Corrected: params.content
         } else {
             let system_ending = if cfg!(windows) { LineEndingStyle::CrLf } else { LineEndingStyle::Lf };
-            normalize_line_endings(¶ms.content, system_ending)
+            normalize_line_endings(&params.content, system_ending) // Corrected: params.content
         };
+        drop(config_guard); // Release lock
 
 
         let mut file = match params.mode {
@@ -340,7 +344,9 @@ impl FilesystemManager {
     
     #[instrument(skip(self, params), fields(path = %params.path))]
     pub async fn create_directory(&self, params: &CreateDirectoryParams) -> Result<FileOperationResult, AppError> {
-        let path = validate_parent_path_access(¶ms.path, &self.config)?;
+        let config_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
+        let path = validate_parent_path_access(&params.path, &config_guard)?; // Corrected: params.path
+        drop(config_guard);
         debug!(create_dir_path = %path.display(), "Creating directory");
         fs::create_dir_all(&path).await?;
         Ok(FileOperationResult {
@@ -352,17 +358,19 @@ impl FilesystemManager {
 
     #[instrument(skip(self, params), fields(path = %params.path))]
     pub async fn list_directory(&self, params: &ListDirectoryParams) -> Result<ListDirectoryResult, AppError> {
-        let path = validate_path_access(¶ms.path, &self.config, true)?;
+        let config_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
+        let path = validate_path_access(&params.path, &config_guard, true)?; // Corrected: params.path
+        drop(config_guard);
         debug!(list_dir_path = %path.display(), "Listing directory");
         let mut entries = Vec::new();
         let mut read_dir = fs::read_dir(&path).await?;
         while let Some(entry_res) = read_dir.next_entry().await? {
             let entry_path = entry_res.path();
             let entry_name = entry_res.file_name().to_string_lossy().to_string();
-            let prefix = if entry_path.is_dir() { "[DIR] " } else { "[FILE]" };
+            let prefix = if entry_path.is_dir() { "[DIR] " } else { "[FILE]" }; // Corrected: [DIR] space
             entries.push(format!("{} {}", prefix, entry_name));
         }
-        entries.sort(); // For consistent output
+        entries.sort();
         Ok(ListDirectoryResult {
             path: params.path.clone(),
             entries,
@@ -371,8 +379,10 @@ impl FilesystemManager {
 
     #[instrument(skip(self, params), fields(source = %params.source, dest = %params.destination))]
     pub async fn move_file(&self, params: &MoveFileParams) -> Result<FileOperationResult, AppError> {
-        let source_path = validate_path_access(¶ms.source, &self.config, true)?;
-        let dest_path = validate_parent_path_access(¶ms.destination, &self.config)?; 
+        let config_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
+        let source_path = validate_path_access(&params.source, &config_guard, true)?; // Corrected: params.source
+        let dest_path = validate_parent_path_access(&params.destination, &config_guard)?;  // Corrected: params.destination
+        drop(config_guard);
         debug!(move_source = %source_path.display(), move_dest = %dest_path.display(), "Moving file/directory");
         fs::rename(&source_path, &dest_path).await?;
         Ok(FileOperationResult {
@@ -384,16 +394,21 @@ impl FilesystemManager {
 
     #[instrument(skip(self, params), fields(path = %params.path, pattern = %params.pattern))]
     pub async fn search_files(&self, params: &SearchFilesParams) -> Result<SearchFilesResult, AppError> {
-        let root_search_path = validate_path_access(¶ms.path, &self.config, true)?;
+        let config_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
+        let root_search_path = validate_path_access(&params.path, &config_guard, true)?; // Corrected: params.path
         debug!(search_root = %root_search_path.display(), pattern = %params.pattern, "Searching files by name");
         
-        let search_operation = async {
+        let search_operation_config = config_guard.clone(); // Clone Arc for async block
+        drop(config_guard); // Release lock
+
+        let search_operation = async move {
             let mut matches = Vec::new();
             let pattern_lower = params.pattern.to_lowercase();
             let mut dirs_to_visit = vec![root_search_path.clone()];
+            let files_root_clone = search_operation_config.read().unwrap().files_root.clone(); // Read inside async
 
             while let Some(current_dir) = dirs_to_visit.pop() {
-                let mut read_dir = match fs::read_dir(¤t_dir).await {
+                let mut read_dir = match fs::read_dir(&current_dir).await { // Corrected: &current_dir
                     Ok(rd) => rd,
                     Err(e) => {
                         warn!(dir = %current_dir.display(), error = %e, "Could not read directory during search_files");
@@ -401,21 +416,19 @@ impl FilesystemManager {
                     }
                 };
 
-                while let Some(entry_res) = read_dir.next_entry().await? {
+                while let Some(entry_res) = read_dir.next_entry().await.map_err(AppError::from)? { // Propagate IO errors
                     let entry = entry_res;
                     let entry_path = entry.path();
                     if entry_path.file_name().unwrap_or_default().to_string_lossy().to_lowercase().contains(&pattern_lower) {
-                        // Return path relative to files_root for brevity and security
-                        if let Ok(relative_path) = entry_path.strip_prefix(&self.config.files_root) {
+                        if let Ok(relative_path) = entry_path.strip_prefix(&files_root_clone) {
                             matches.push(relative_path.to_string_lossy().into_owned());
                         } else {
-                            // Fallback to absolute if not under files_root (should not happen with validation)
                             matches.push(entry_path.to_string_lossy().into_owned());
                         }
                     }
                     if entry_path.is_dir() {
-                        // Ensure subdirectory is also allowed before adding to visit list
-                        if validate_path_access(entry_path.to_str().unwrap_or_default(), &self.config, true).is_ok() {
+                         // Re-check with config inside async block
+                        if validate_path_access(entry_path.to_str().unwrap_or_default(), &search_operation_config.read().unwrap(), true).is_ok() {
                             dirs_to_visit.push(entry_path);
                         }
                     }
@@ -433,8 +446,8 @@ impl FilesystemManager {
                 matches,
                 timed_out: false,
             }),
-            Ok(Err(e)) => Err(e), // Propagate AppError from search_operation
-            Err(_) => Ok(SearchFilesResult { // Timeout occurred
+            Ok(Err(e)) => Err(e),
+            Err(_) => Ok(SearchFilesResult {
                 path: params.path.clone(),
                 pattern: params.pattern.clone(),
                 matches: vec![],
@@ -445,7 +458,9 @@ impl FilesystemManager {
     
     #[instrument(skip(self, params), fields(path = %params.path))]
     pub async fn get_file_info(&self, params: &GetFileInfoParams) -> Result<FileInfoResult, AppError> {
-        let path = validate_path_access(¶ms.path, &self.config, true)?;
+        let config_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
+        let path = validate_path_access(&params.path, &config_guard, true)?; // Corrected: params.path
+        drop(config_guard);
         debug!(info_path = %path.display(), "Getting file info");
         let metadata = fs::metadata(&path).await?;
 
@@ -456,7 +471,7 @@ impl FilesystemManager {
         };
 
         let permissions_octal = if cfg!(unix) {
-            use std::os::unix::fs::PermissionsExt;
+            use std::os::unix::fs::PermissionsExt; // Moved use statement inside block
             Some(format!("{:03o}", metadata.permissions().mode() & 0o777))
         } else {
             None 

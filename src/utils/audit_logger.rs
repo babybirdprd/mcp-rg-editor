@@ -3,20 +3,26 @@ use anyhow::Result;
 use chrono::Utc;
 use serde_json::Value;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock as StdRwLock}; // Changed to StdRwLock for Config
 use tokio::fs::{self, OpenOptions};
 use tokio::io::AsyncWriteExt;
 use tracing::error;
 
+#[derive(Debug)] // Added Debug
 pub struct AuditLogger {
     log_file_path: PathBuf,
     max_size_bytes: u64,
+    // No need to store config Arc if only used in constructor for paths
 }
 
 impl AuditLogger {
-    pub fn new(config: Arc<Config>) -> Self {
-        // Ensure log directory exists
-        if let Some(parent_dir) = config.audit_log_file.parent() {
+    pub fn new(config: Arc<StdRwLock<Config>>) -> Self { // Changed to StdRwLock
+        let config_guard = config.read().unwrap(); // Read lock to get paths
+        let log_file_path = config_guard.audit_log_file.clone();
+        let max_size_bytes = config_guard.audit_log_max_size_bytes;
+        drop(config_guard); // Release lock
+
+        if let Some(parent_dir) = log_file_path.parent() {
             if !parent_dir.exists() {
                 if let Err(e) = std::fs::create_dir_all(parent_dir) {
                     error!(path = %parent_dir.display(), error = %e, "Failed to create audit log directory");
@@ -24,8 +30,8 @@ impl AuditLogger {
             }
         }
         Self {
-            log_file_path: config.audit_log_file.clone(),
-            max_size_bytes: config.audit_log_max_size_bytes,
+            log_file_path,
+            max_size_bytes,
         }
     }
 
@@ -67,11 +73,10 @@ impl AuditLogger {
 
         let timestamp = Utc::now().to_rfc3339();
         
-        // Sanitize arguments for logging - primarily to avoid logging large file contents
         let mut sanitized_args = arguments.clone();
         if let Some(obj) = sanitized_args.as_object_mut() {
             if let Some(content_val) = obj.get_mut("content") {
-                if content_val.is_string() && content_val.as_str().unwrap_or("").len() > 1024 { // Arbitrary limit for "large"
+                if content_val.is_string() && content_val.as_str().unwrap_or("").len() > 1024 {
                     *content_val = Value::String("<content truncated for log>".to_string());
                 }
             }

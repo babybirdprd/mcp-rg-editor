@@ -1,14 +1,14 @@
 use crate::config::Config;
 use anyhow::Result;
 use chrono::Utc;
-use serde::Serialize; // For potential future use if we serialize to JSON log
+use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::fs::{self, OpenOptions};
+use std::sync::{Arc, RwLock as StdRwLock}; // Changed to StdRwLock for Config
+use tokio::fs::{self, OpenOptions}; // Added self
 use tokio::io::AsyncWriteExt;
 use tracing::error;
 
-#[derive(Debug, Serialize)] // Added Serialize for potential JSON logging
+#[derive(Debug, Serialize)]
 pub struct FuzzySearchLogEntry {
     pub timestamp: chrono::DateTime<Utc>,
     pub search_text: String,
@@ -23,20 +23,24 @@ pub struct FuzzySearchLogEntry {
     pub search_length: usize,
     pub found_length: usize,
     pub file_extension: String,
-    pub character_codes: String, // e.g., "32:10,97:5" (code:count)
+    pub character_codes: String,
     pub unique_character_count: usize,
     pub diff_length: usize,
 }
 
+#[derive(Debug)] // Added Debug
 pub struct FuzzySearchLogger {
     log_file_path: PathBuf,
     initialized: bool,
 }
 
 impl FuzzySearchLogger {
-    pub fn new(config: Arc<Config>) -> Self {
-        // Ensure log directory exists
-        if let Some(parent_dir) = config.fuzzy_search_log_file.parent() {
+    pub fn new(config: Arc<StdRwLock<Config>>) -> Self { // Changed to StdRwLock
+        let config_guard = config.read().unwrap(); // Read lock
+        let log_file_path = config_guard.fuzzy_search_log_file.clone();
+        drop(config_guard); // Release lock
+
+        if let Some(parent_dir) = log_file_path.parent() {
             if !parent_dir.exists() {
                 if let Err(e) = std::fs::create_dir_all(parent_dir) {
                      error!(path = %parent_dir.display(), error = %e, "Failed to create fuzzy search log directory");
@@ -44,7 +48,7 @@ impl FuzzySearchLogger {
             }
         }
         Self {
-            log_file_path: config.fuzzy_search_log_file.clone(),
+            log_file_path,
             initialized: false,
         }
     }
@@ -74,16 +78,17 @@ impl FuzzySearchLogger {
         Ok(())
     }
 
-    pub async fn log(&mut self, entry: &FuzzySearchLogEntry) {
+    pub async fn log(&mut self, entry: &FuzzySearchLogEntry) -> Result<()> { // Made public and returning Result
         if let Err(e) = self.try_log(entry).await {
             error!(error = %e, "Failed to write fuzzy search log");
+            return Err(e); // Propagate error
         }
+        Ok(())
     }
 
     async fn try_log(&mut self, entry: &FuzzySearchLogEntry) -> Result<()> {
         self.ensure_log_file_initialized().await?;
 
-        // Helper to escape tabs and newlines for TSV
         let escape = |s: &str| s.replace('\t', "\\t").replace('\n', "\\n").replace('\r', "\\r");
 
         let log_line = format!(

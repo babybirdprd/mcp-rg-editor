@@ -2,9 +2,9 @@ use crate::config::Config;
 use crate::error::AppError;
 use crate::utils::path_utils::validate_path_access;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use std::process::Stdio as StdProcessStdio; // Alias to avoid conflict with tokio::process::Stdio
-use std::sync::Arc;
+use std::path::PathBuf; // Removed Path as not directly used
+use std::process::Stdio as StdProcessStdio;
+use std::sync::{Arc, RwLock as StdRwLock}; // Changed to StdRwLock for Config
 use tokio::process::Command as TokioCommand;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, instrument, warn};
@@ -13,22 +13,24 @@ use tracing::{debug, error, instrument, warn};
 pub struct SearchCodeParams {
     pub pattern: String,
     #[serde(default)]
-    pub path: String, // Path to search in, can be relative to FILES_ROOT or absolute if allowed
+    pub path: String,
     #[serde(default, alias = "fixedStrings")]
     pub fixed_strings: bool,
-    #[serde(default, alias = "ignoreCase")] // Match desktop-commander schema
-    pub ignore_case: bool, // rg default is smart case, -i for ignore, -s for case-sensitive
+    #[serde(default, alias = "ignoreCase")]
+    pub ignore_case: bool,
+    #[serde(default)] // Added default for case_sensitive
+    pub case_sensitive: bool, // Added this field
     #[serde(default = "default_true", alias = "lineNumbers")]
     pub line_numbers: bool,
     #[serde(alias = "contextLines")]
     pub context_lines: Option<usize>,
-    #[serde(default, alias = "filePattern")] // Match desktop-commander schema
-    pub file_pattern: Option<String>, // rg -g/--glob
+    #[serde(default, alias = "filePattern")]
+    pub file_pattern: Option<String>,
     #[serde(alias = "maxDepth")]
     pub max_depth: Option<usize>,
     #[serde(default = "default_usize_1000", alias = "maxResults")]
     pub max_results: usize,
-    #[serde(default, alias = "includeHidden")] // Match desktop-commander schema
+    #[serde(default, alias = "includeHidden")]
     pub include_hidden: bool,
     #[serde(default, rename = "timeoutMs")]
     pub timeout_ms: Option<u64>,
@@ -40,9 +42,9 @@ fn default_usize_1000() -> usize { 1000 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RipgrepMatch {
-    pub file: String, // Relative to search root
+    pub file: String,
     pub line: u64,
-    pub match_text: String, // The actual matched line content
+    pub match_text: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -55,22 +57,20 @@ pub struct SearchCodeResult {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SearchStats {
     pub matched_lines: usize,
-    // Ripgrep JSON output doesn't easily provide total files searched or bytes.
-    // We could add a summary run with --stats if needed, but it adds overhead.
     pub elapsed_ms: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug)] // Added Debug
 pub struct RipgrepSearcher {
-    config: Arc<Config>,
+    config: Arc<StdRwLock<Config>>, // Changed to StdRwLock
     rg_path: PathBuf,
 }
 
 impl RipgrepSearcher {
-    pub fn new(config: Arc<Config>) -> Self {
+    pub fn new(config: Arc<StdRwLock<Config>>) -> Self { // Changed to StdRwLock
         let rg_path = which::which("rg").unwrap_or_else(|_| {
             warn!("ripgrep (rg) not found in PATH. search_code tool will not function.");
-            PathBuf::from("rg") // Store it anyway, execution will fail if not found
+            PathBuf::from("rg")
         });
         Self { config, rg_path }
     }
@@ -81,19 +81,22 @@ impl RipgrepSearcher {
              return Err(AppError::RipgrepError("ripgrep (rg) executable not found in PATH. Please install ripgrep.".to_string()));
         }
         debug!("Starting ripgrep search_code with params: {:?}", params);
+        
+        let config_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
+
 
         let search_dir_str = if params.path.is_empty() {
-            self.config.files_root.to_str().unwrap_or(".").to_string()
+            config_guard.files_root.to_str().unwrap_or(".").to_string()
         } else {
             params.path.clone()
         };
         
-        let search_path_validated = validate_path_access(&search_dir_str, &self.config, true)?;
+        let search_path_validated = validate_path_access(&search_dir_str, &config_guard, true)?;
         
         let start_time = std::time::Instant::now();
         let mut cmd = TokioCommand::new(&self.rg_path);
 
-        cmd.current_dir(&self.config.files_root); // Run rg from files_root for consistent relative paths
+        cmd.current_dir(&config_guard.files_root);
 
         cmd.arg("--json"); 
         if params.line_numbers {
@@ -102,17 +105,19 @@ impl RipgrepSearcher {
         if params.fixed_strings {
             cmd.arg("-F");
         }
-        if params.ignore_case {
-            cmd.arg("-i");
-        } else if params.case_sensitive { // Explicit case sensitive if ignore_case is false
+        
+        // Ripgrep logic: -s (case-sensitive) overrides -i (ignore-case). Smart case is default.
+        if params.case_sensitive {
             cmd.arg("-s");
+        } else if params.ignore_case { // Only apply ignore_case if case_sensitive is false
+            cmd.arg("-i");
         }
-        // Smart case is rg's default if neither -i nor -s is given.
+
 
         if let Some(context) = params.context_lines {
             cmd.arg("-C").arg(context.to_string());
         }
-        if let Some(glob) = ¶ms.file_pattern {
+        if let Some(glob) = &params.file_pattern { // Corrected: &params.file_pattern
             cmd.arg("-g").arg(glob);
         }
         if let Some(depth) = params.max_depth {
@@ -123,11 +128,14 @@ impl RipgrepSearcher {
             cmd.arg("--hidden");
         }
         
-        cmd.arg(¶ms.pattern);
-        cmd.arg(&search_path_validated); // Use the validated, absolute path
+        cmd.arg(&params.pattern); // Corrected: params.pattern
+        cmd.arg(&search_path_validated);
 
         cmd.stdout(StdProcessStdio::piped());
         cmd.stderr(StdProcessStdio::piped());
+        
+        let files_root_clone_for_path_processing = config_guard.files_root.clone(); // Clone for use in parsing
+        drop(config_guard); // Release lock
 
         debug!("Executing rg command: {:?}", cmd);
         
@@ -144,13 +152,13 @@ impl RipgrepSearcher {
             Ok(output)
         };
         
-        let timeout_duration = Duration::from_millis(params.timeout_ms.unwrap_or(30000)); // Default 30s
+        let timeout_duration = Duration::from_millis(params.timeout_ms.unwrap_or(30000));
         
         match timeout(timeout_duration, child_process_future).await {
-            Ok(Ok(output)) => { // Command finished within timeout
+            Ok(Ok(output)) => {
                 let elapsed_ms = start_time.elapsed().as_millis() as u64;
 
-                if !output.status.success() && output.status.code() != Some(1) { // code 1 means no matches found, which is not an error for us
+                if !output.status.success() && output.status.code() != Some(1) {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     error!("Ripgrep command failed with status {:?}: {}", output.status, stderr);
                     return Err(AppError::RipgrepError(format!(
@@ -184,16 +192,13 @@ impl RipgrepSearcher {
                                             }
                                         }
                                     } else if let Some(lines_text_val) = data.get("lines").and_then(|l| l.get("text")) {
-                                        // This handles context lines if submatches are not present for the main match line
                                         full_match_line.push_str(lines_text_val.as_str().unwrap_or(""));
                                     }
 
-
-                                    // Make path relative to files_root for consistent output
-                                    let absolute_match_path = self.config.files_root.join(path_text);
-                                    let display_path = match absolute_match_path.strip_prefix(&self.config.files_root) {
+                                    let absolute_match_path = files_root_clone_for_path_processing.join(path_text);
+                                    let display_path = match absolute_match_path.strip_prefix(&files_root_clone_for_path_processing) {
                                         Ok(p) => p.to_string_lossy().into_owned(),
-                                        Err(_) => path_text.to_string(), // fallback if stripping fails
+                                        Err(_) => path_text.to_string(),
                                     };
 
                                     matches.push(RipgrepMatch {
@@ -209,8 +214,8 @@ impl RipgrepSearcher {
                                     let line_num = data.get("line_number").and_then(|n| n.as_u64()).unwrap_or(0);
                                     let context_line_text = data.get("lines").and_then(|l| l.get("text")).and_then(|t| t.as_str()).unwrap_or_default();
 
-                                    let absolute_match_path = self.config.files_root.join(path_text);
-                                    let display_path = match absolute_match_path.strip_prefix(&self.config.files_root) {
+                                    let absolute_match_path = files_root_clone_for_path_processing.join(path_text);
+                                    let display_path = match absolute_match_path.strip_prefix(&files_root_clone_for_path_processing) {
                                         Ok(p) => p.to_string_lossy().into_owned(),
                                         Err(_) => path_text.to_string(),
                                     };
@@ -219,7 +224,6 @@ impl RipgrepSearcher {
                                         line: line_num,
                                         match_text: context_line_text.trim_end().to_string(),
                                     });
-                                    // Don't increment matched_lines_count for context lines
                                  }
                             }
                         }
@@ -238,8 +242,8 @@ impl RipgrepSearcher {
                     timed_out: false,
                 })
             },
-            Ok(Err(app_error)) => Err(app_error), // Error from spawning/running the command
-            Err(_) => { // Timeout occurred
+            Ok(Err(app_error)) => Err(app_error),
+            Err(_) => {
                 let elapsed_ms = start_time.elapsed().as_millis() as u64;
                 warn!(pattern = %params.pattern, path = %params.path, timeout = timeout_duration.as_millis(), "Ripgrep search timed out");
                 Ok(SearchCodeResult {
