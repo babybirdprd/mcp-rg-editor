@@ -15,9 +15,14 @@ use tracing::Level;
 use tracing_subscriber::{filter::EnvFilter, FmtSubscriber, fmt::format::FmtSpan};
 
 #[cfg(feature = "sse")]
-use rust_mcp_sdk::mcp_server::hyper_server::{create_server as create_sse_server, HyperServerOptions, HyperServer}; // Corrected import path
+use rust_mcp_sdk::{
+    hyper_servers::{create_server as create_sse_server, HyperServerOptions, HyperServerRuntime as HyperServer},
+};
+
 #[cfg(feature = "stdio")]
-use rust_mcp_sdk::mcp_server::server_runtime::{create_server as create_stdio_server, ServerRuntime}; // Corrected import path
+use rust_mcp_sdk::mcp_server::{
+    server_runtime::create_server as create_stdio_server, ServerRuntime
+};
 
 
 fn setup_logging(log_level_str: &str) {

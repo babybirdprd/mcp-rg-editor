@@ -113,11 +113,15 @@ impl TerminalManager {
         }
 
         let session_id = Uuid::new_v4().to_string();
-        let shell_to_use = params.shell.as_ref().or(config_guard.default_shell.as_ref());
         
-        let mut command_process = if let Some(shell_path) = shell_to_use {
-            let mut cmd = TokioCommand::new(shell_path);
-            if shell_path.contains("powershell") || shell_path.contains("cmd.exe") {
+        // Clone necessary values from config_guard before it's dropped or its lifetime ends for shell_to_use_cloned
+        let files_root_clone = config_guard.files_root.clone();
+        let shell_to_use_cloned = params.shell.clone().or_else(|| config_guard.default_shell.clone());
+        drop(config_guard); // Drop the guard as soon as its direct data is not needed
+
+        let mut command_process = if let Some(shell_path_str) = &shell_to_use_cloned {
+            let mut cmd = TokioCommand::new(shell_path_str);
+            if shell_path_str.contains("powershell") || shell_path_str.contains("cmd.exe") {
                  cmd.arg("-Command"); // Or /C for cmd.exe
             } else {
                  cmd.arg("-c");
@@ -125,8 +129,6 @@ impl TerminalManager {
             cmd.arg(&params.command);
             cmd
         } else {
-            // Basic parsing for direct command execution
-            // This is a simplification; a proper shell parser would be more robust
             let mut parts = params.command.split_whitespace();
             let program = parts.next().ok_or_else(|| AppError::CommandExecutionError("Empty command".to_string()))?;
             let mut cmd = TokioCommand::new(program);
@@ -134,14 +136,13 @@ impl TerminalManager {
             cmd
         };
 
-        command_process.current_dir(&config_guard.files_root); 
-        drop(config_guard);
+        command_process.current_dir(&files_root_clone); 
 
         command_process.stdin(StdProcessStdio::null());
         command_process.stdout(StdProcessStdio::piped());
         command_process.stderr(StdProcessStdio::piped());
 
-        debug!(shell = ?shell_to_use, command = %params.command, "Spawning command");
+        debug!(shell = ?shell_to_use_cloned, command = %params.command, "Spawning command");
         
         let child_instance = command_process.spawn().map_err(|e| {
             error!(error = %e, command = %params.command, "Failed to spawn command");
@@ -290,19 +291,20 @@ impl TerminalManager {
     pub async fn force_terminate(&self, params: &ForceTerminateParams) -> Result<ForceTerminateResult, AppError> {
         let session_arc_opt = {
             let mut sessions_map_guard = self.sessions.lock().await;
-            sessions_map_guard.remove(&params.session_id)
+            sessions_map_guard.remove(&params.session_id) // Remove first to prevent race conditions on re-insert
         };
 
         if let Some(session_arc_unwrapped) = session_arc_opt {
             let mut child_guard = session_arc_unwrapped.child_mutex.lock().await;
-            if let Some(child_process) = child_guard.as_mut() {
+            if let Some(child_process) = child_guard.as_mut() { // child_guard is MutexGuard<Option<Child>>
                 match child_process.start_kill() {
                     Ok(_) => {
                         info!(sid = %params.session_id, pid = ?session_arc_unwrapped.pid, "Termination signal sent to process");
-                        // Optionally wait a bit for the process to exit
                         let _ = timeout(Duration::from_millis(500), child_process.wait()).await;
-                        *session_arc_unwrapped.exit_code.lock().await = Some(-9); // Mark as killed
+                        *session_arc_unwrapped.exit_code.lock().await = Some(-9); 
                         session_arc_unwrapped.is_finished_notify.notify_waiters();
+                        // Do not drop child_guard here explicitly, it will drop at end of scope.
+                        // session_arc_unwrapped is not re-inserted on success.
                         Ok(ForceTerminateResult {
                             session_id: params.session_id.clone(),
                             success: true,
@@ -311,8 +313,12 @@ impl TerminalManager {
                     }
                     Err(e) => {
                         warn!(sid = %params.session_id, pid = ?session_arc_unwrapped.pid, error = %e, "Failed to send kill signal");
-                        // Reinsert if kill failed, as it's still technically active though we tried to kill
-                        self.sessions.lock().await.insert(params.session_id.clone(), session_arc_unwrapped);
+                        // session_arc_unwrapped was already removed, re-insert its clone.
+                        // child_guard needs to be dropped before re-inserting to avoid deadlock if the insert itself needs to lock sessions.
+                        // However, sessions lock is already released by this point.
+                        // The critical part is that child_guard is still live.
+                        drop(child_guard); // Explicitly drop child_guard before re-inserting the Arc.
+                        self.sessions.lock().await.insert(params.session_id.clone(), session_arc_unwrapped.clone());
                         Ok(ForceTerminateResult {
                             session_id: params.session_id.clone(),
                             success: false,
@@ -320,11 +326,14 @@ impl TerminalManager {
                         })
                     }
                 }
-            } else { // Child was already None
+            } else { 
+                 // Child was already None, meaning the monitoring task took it or it was already processed.
+                 // session_arc_unwrapped was removed from sessions map. If it's already finished, this is fine.
+                 // If it was expected to be running, this indicates an issue or it finished very quickly.
                  Ok(ForceTerminateResult {
                     session_id: params.session_id.clone(),
-                    success: false, // Or true if "already terminated" is considered success
-                    message: "Process already terminated or not found in session.".to_string(),
+                    success: false, 
+                    message: "Process already terminated or not found in session's child_mutex.".to_string(),
                 })
             }
         } else {

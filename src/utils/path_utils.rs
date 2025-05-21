@@ -119,7 +119,9 @@ pub fn validate_parent_path_access(
             Ok(normalized_target_path)
         }
         None => {
-            validate_path_access(normalized_target_path.to_str().unwrap_or_default(), config_guard, true)?;
+            // If there's no parent, it means it's a root-like path (e.g., "/" or "C:\").
+            // Validate this path itself.
+            validate_path_access(normalized_target_path.to_str().unwrap_or_default(), config_guard, false)?; // check_existence false for root itself
             Ok(normalized_target_path)
         }
     }

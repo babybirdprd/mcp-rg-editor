@@ -1,11 +1,10 @@
-// FILE: src/utils/fuzzy_search_logger.rs
 use crate::config::Config;
 use anyhow::Result;
 use chrono::Utc;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock as StdRwLock}; 
-use tokio::fs::OpenOptions; // Corrected import
+use tokio::fs::OpenOptions; 
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex as TokioMutex; // For internal mutability
 use tracing::error;
@@ -33,7 +32,7 @@ pub struct FuzzySearchLogEntry {
 #[derive(Debug)] 
 pub struct FuzzySearchLogger {
     log_file_path: PathBuf,
-    initialized: TokioMutex<bool>, // Changed to TokioMutex<bool>
+    initialized: TokioMutex<bool>, 
 }
 
 impl FuzzySearchLogger {
@@ -52,17 +51,17 @@ impl FuzzySearchLogger {
         }
         Self {
             log_file_path,
-            initialized: TokioMutex::new(false), // Initialize Mutex
+            initialized: TokioMutex::new(false), 
         }
     }
 
-    async fn ensure_log_file_initialized(&self) -> Result<()> { // Takes &self
-        let mut initialized_guard = self.initialized.lock().await; // Lock the mutex
+    async fn ensure_log_file_initialized(&self) -> Result<()> { 
+        let mut initialized_guard = self.initialized.lock().await; 
         if *initialized_guard {
             return Ok(());
         }
 
-        // Check existence asynchronously
+        
         let exists = match tokio::fs::metadata(&self.log_file_path).await {
             Ok(_) => true,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
@@ -85,11 +84,11 @@ impl FuzzySearchLogger {
                 .await?;
             file.write_all(format!("{}\n", headers).as_bytes()).await?;
         }
-        *initialized_guard = true; // Mutate through guard
+        *initialized_guard = true; 
         Ok(())
     }
 
-    pub async fn log(&self, entry: &FuzzySearchLogEntry) -> Result<()> { // Takes &self
+    pub async fn log(&self, entry: &FuzzySearchLogEntry) -> Result<()> { 
         if let Err(e) = self.try_log(entry).await {
             error!(error = %e, "Failed to write fuzzy search log");
             return Err(e); 
@@ -97,7 +96,7 @@ impl FuzzySearchLogger {
         Ok(())
     }
 
-    async fn try_log(&self, entry: &FuzzySearchLogEntry) -> Result<()> { // Takes &self
+    async fn try_log(&self, entry: &FuzzySearchLogEntry) -> Result<()> { 
         self.ensure_log_file_initialized().await?;
 
         let escape = |s: &str| s.replace('\t', "\\t").replace('\n', "\\n").replace('\r', "\\r");
@@ -124,7 +123,7 @@ impl FuzzySearchLogger {
 
         let mut file = OpenOptions::new()
             .append(true)
-            .open(&self.log_file_path) // This OpenOptions is tokio::fs::OpenOptions
+            .open(&self.log_file_path) 
             .await?;
         file.write_all(log_line.as_bytes()).await?;
         Ok(())

@@ -232,11 +232,11 @@ impl FilesystemManager {
             let mut content_vec = Vec::new();
             let mut current_line_idx = 0;
             let mut total_lines_count = 0;
-            // Access config_guard fields directly
-            let read_limit = params.length.unwrap_or(config_guard.file_read_line_limit);
-            drop(config_guard); // Release lock
             
-            while let Some(line_res) = lines_iter.next_line().await.map_err(AppError::TokioIoError)? { // Use TokioIoError
+            let read_limit = params.length.unwrap_or(config_guard.file_read_line_limit);
+            drop(config_guard); 
+            
+            while let Some(line_res) = lines_iter.next_line().await.map_err(AppError::from)? { // Use AppError::from for tokio::io::Error
                 total_lines_count += 1;
                 if current_line_idx >= params.offset && content_vec.len() < read_limit {
                     content_vec.push(line_res);
@@ -247,13 +247,15 @@ impl FilesystemManager {
                 }
             }
             
-            let lines_read_count = content_vec.len();
             let text_content = content_vec.join("\n");
+            // Calculate lines_read_count from text_content *after* it's fully formed and *before* it's moved.
+            // However, content_vec.len() is already the number of lines pushed to content_vec.
+            let lines_read_count = content_vec.len(); 
             let is_truncated = params.offset > 0 || (lines_read_count == read_limit && (params.offset + lines_read_count) < total_lines_count);
 
             Ok(FileContent {
                 path: params.path.clone(),
-                text_content: Some(text_content),
+                text_content: Some(text_content), // text_content is moved here
                 image_data_base64: None,
                 mime_type,
                 lines_read: Some(lines_read_count),
@@ -393,7 +395,7 @@ impl FilesystemManager {
         let root_search_path = validate_path_access(&params.path, &config_guard, true)?;
         debug!(search_root = %root_search_path.display(), pattern = %params.pattern, "Searching files by name");
         
-        let search_operation_config_arc = self.config.clone(); // Clone Arc for async block
+        let search_operation_config_arc = self.config.clone(); 
         drop(config_guard);
 
         let search_operation = async move {
@@ -401,7 +403,7 @@ impl FilesystemManager {
             let pattern_lower = params.pattern.to_lowercase();
             let mut dirs_to_visit = vec![root_search_path.clone()];
             
-            // Read config inside the async block
+            
             let current_config = search_operation_config_arc.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned in search task")))?;
             let files_root_clone = current_config.files_root.clone();
 
@@ -415,7 +417,7 @@ impl FilesystemManager {
                     }
                 };
 
-                while let Some(entry_res) = read_dir.next_entry().await.map_err(AppError::StdIoError)? {
+                while let Some(entry_res) = read_dir.next_entry().await.map_err(|e| AppError::TokioIoError(e))? { // Use TokioIoError
                     let entry = entry_res;
                     let entry_path = entry.path();
                     if entry_path.file_name().unwrap_or_default().to_string_lossy().to_lowercase().contains(&pattern_lower) {
@@ -426,7 +428,7 @@ impl FilesystemManager {
                         }
                     }
                     if entry_path.is_dir() {
-                        // Re-check with config inside async block
+                        
                         let current_config_for_subdir_check = search_operation_config_arc.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned for subdir check")))?;
                         if validate_path_access(entry_path.to_str().unwrap_or_default(), &current_config_for_subdir_check, true).is_ok() {
                             dirs_to_visit.push(entry_path);
@@ -471,7 +473,7 @@ impl FilesystemManager {
         };
 
         let permissions_octal = if cfg!(unix) {
-            use std::os::unix::fs::PermissionsExt;
+            use std::os::unix::fs::PermissionsExt; // Import conditionally
             Some(format!("{:03o}", metadata.permissions().mode() & 0o777))
         } else {
             None 

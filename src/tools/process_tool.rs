@@ -1,11 +1,10 @@
-// FILE: src/tools/process_tool.rs
 use crate::config::Config;
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock as StdRwLock};
 use sysinfo::{Pid, Signal, Uid, System};
-use sysinfo::ProcessExt as SysinfoProcessExt; // Aliased import
-use sysinfo::SystemExt as SysinfoSystemExt;   // Aliased import
+// Removed: use sysinfo::ProcessExt as SysinfoProcessExt; 
+// Removed: use sysinfo::SystemExt as SysinfoSystemExt;   
 use tracing::{instrument, debug, warn};
 use std::sync::Mutex as StdMutexForSysinfo;
 
@@ -39,7 +38,7 @@ pub struct ProcessManager {
 }
 
 fn format_uid(uid_opt: Option<&Uid>) -> Option<String> {
-    uid_opt.map(|uid| format!("{:?}", uid))
+    uid_opt.map(|uid| format!("{}", uid)) // Simpler formatting for Uid
 }
 
 impl ProcessManager {
@@ -86,7 +85,7 @@ impl ProcessManager {
         debug!(target_pid = %pid_to_kill, "Attempting to kill process");
 
         if let Some(process) = sys_guard.process(pid_to_kill) {
-            if process.kill_with(Signal::Term).unwrap_or(false) {
+            if process.kill_with(Signal::Term).unwrap_or(false) { // kill_with is on Process directly
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                 sys_guard.refresh_process(pid_to_kill); 
                 if sys_guard.process(pid_to_kill).is_none() { 
@@ -99,7 +98,7 @@ impl ProcessManager {
             }
             
             warn!(pid = %pid_to_kill, "Process did not terminate with SIGTERM, trying SIGKILL");
-            if process.kill_with(Signal::Kill).unwrap_or(false) { 
+            if process.kill_with(Signal::Kill).unwrap_or(false) { // kill_with is on Process directly
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
                 sys_guard.refresh_process(pid_to_kill); 
                 if sys_guard.process(pid_to_kill).is_none() {

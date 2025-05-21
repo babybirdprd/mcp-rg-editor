@@ -1,6 +1,6 @@
 // FILE: src/error.rs
 use thiserror::Error;
-use rust_mcp_schema::error::RpcErrorCode; // Changed import path
+use rust_mcp_schema::RpcErrorCode; // Corrected import path
 
 #[derive(Error, Debug)]
 pub enum AppError {
@@ -86,11 +86,8 @@ impl From<AppError> for rust_mcp_schema::schema_utils::CallToolError {
     }
 }
 
-impl From<std::io::Error> for AppError {
-    fn from(err: std::io::Error) -> Self {
-        AppError::StdIoError(err)
-    }
-}
+// Removed: impl From<std::io::Error> for AppError to resolve E0119
+// std::io::Error can be converted to tokio::io::Error, which then uses the From<tokio::io::Error> impl.
 
 impl From<tokio::io::Error> for AppError {
     fn from(err: tokio::io::Error) -> Self {
