@@ -16,7 +16,7 @@ use tracing_subscriber::{filter::EnvFilter, FmtSubscriber, fmt::format::FmtSpan}
 
 #[cfg(feature = "sse")]
 use rust_mcp_sdk::{
-    hyper_servers::{create_server as create_sse_server, HyperServerOptions, HyperServerRuntime as HyperServer},
+    hyper_server::{create_server as create_sse_server, HyperServerOptions, HyperServerRuntime as HyperServer}, // Corrected: hyper_server
 };
 
 #[cfg(feature = "stdio")]
