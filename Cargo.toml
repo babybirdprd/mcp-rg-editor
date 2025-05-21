@@ -7,9 +7,9 @@ description = "Desktop Commander features in Rust: Ripgrep, Filesystem, Terminal
 
 [dependencies]
 # MCP implementation
-rust-mcp-sdk = "0.2.4"
+rust-mcp-sdk = "0.2.6"
 rust-mcp-schema = "0.4.0"
-rust-mcp-transport = "0.2.1"
+rust-mcp-transport = "0.2.3"
 async-trait = "0.1.88"
 
 # Core functionality
