@@ -1,14 +1,14 @@
 use crate::config::Config;
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock as StdRwLock}; // Changed to StdRwLock for Config
-use sysinfo::{Pid, ProcessExt as _, System, SystemExt as _, Signal}; // Corrected trait imports
+use std::sync::{Arc, RwLock as StdRwLock};
+use sysinfo::{Pid, ProcessExt, System, SystemExt, Signal, Uid, Gid}; // Added Uid, Gid
 use tracing::{instrument, debug, warn};
-use std::sync::Mutex as StdMutexForSysinfo; // Renamed for clarity
+use std::sync::Mutex as StdMutexForSysinfo;
 
 #[derive(Debug, Deserialize)]
 pub struct KillProcessParams {
-    pub pid: usize,
+    pub pid: usize, // sysinfo::Pid takes usize
 }
 
 #[derive(Debug, Serialize)]
@@ -29,14 +29,23 @@ pub struct KillProcessResult {
     pub message: String,
 }
 
-#[derive(Debug)] // Added Debug
+#[derive(Debug)]
 pub struct ProcessManager {
-    _config: Arc<StdRwLock<Config>>, // Changed to StdRwLock
+    _config: Arc<StdRwLock<Config>>,
     system: Arc<StdMutexForSysinfo<System>>,
 }
 
+// Helper to convert Uid/Gid to String for serialization
+fn format_uid(uid_opt: Option<&Uid>) -> Option<String> {
+    uid_opt.map(|uid| format!("{:?}", uid))
+}
+// fn format_gid(gid_opt: Option<&Gid>) -> Option<String> {
+//     gid_opt.map(|gid| format!("{:?}", gid))
+// }
+
+
 impl ProcessManager {
-    pub fn new(config: Arc<StdRwLock<Config>>) -> Self { // Changed to StdRwLock
+    pub fn new(config: Arc<StdRwLock<Config>>) -> Self {
         let mut sys = System::new_all();
         sys.refresh_all(); 
         Self {
@@ -53,19 +62,18 @@ impl ProcessManager {
         sys_guard.refresh_processes(); 
         debug!("Listing system processes. Found {} processes.", sys_guard.processes().len());
 
-        let mut processes_info = Vec::new();
-        for (pid_obj, process) in sys_guard.processes() {
-            processes_info.push(ProcessInfo {
-                pid: pid_obj.as_u32().to_string(), // Use as_u32() for Pid
+        let processes_info = sys_guard.processes().iter().map(|(pid_obj, process)| {
+            ProcessInfo {
+                pid: pid_obj.as_u32().to_string(),
                 name: process.name().to_string(),
                 cpu_usage: process.cpu_usage(),
-                memory_mb: process.memory() / (1024 * 1024),
+                memory_mb: process.memory() / (1024 * 1024), // Bytes to MB
                 command: process.cmd().join(" "),
                 status: process.status().to_string(),
-                 user: process.user_id().map(|uid| format!("{:?}", uid.to_string())), // Convert Gid/Uid to string
+                user: format_uid(process.user_id()),
                 start_time_epoch_secs: process.start_time(),
-            });
-        }
+            }
+        }).collect();
         Ok(processes_info)
     }
 
@@ -76,14 +84,14 @@ impl ProcessManager {
         })?;
         sys_guard.refresh_processes();
         
-        let pid_to_kill = Pid::from(params.pid);
+        let pid_to_kill = Pid::from(params.pid); // Pid::from takes usize
         debug!(target_pid = %pid_to_kill, "Attempting to kill process");
 
         if let Some(process) = sys_guard.process(pid_to_kill) {
-            if process.kill_with(Signal::Term).unwrap_or(false) { // Use kill_with for Signal
+            if process.kill_with(Signal::Term).unwrap_or(false) {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                sys_guard.refresh_process(pid_to_kill);
-                if sys_guard.process(pid_to_kill).is_none() {
+                sys_guard.refresh_process(pid_to_kill); // Refresh specific process
+                if sys_guard.process(pid_to_kill).is_none() { // Check if it's gone
                      debug!(pid = %pid_to_kill, "Process terminated with SIGTERM");
                     return Ok(KillProcessResult {
                         success: true,
@@ -93,9 +101,9 @@ impl ProcessManager {
             }
             
             warn!(pid = %pid_to_kill, "Process did not terminate with SIGTERM, trying SIGKILL");
-            if process.kill_with(Signal::Kill).unwrap_or(false) { // Use kill_with for Signal
+            if process.kill_with(Signal::Kill).unwrap_or(false) {
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                sys_guard.refresh_process(pid_to_kill);
+                sys_guard.refresh_process(pid_to_kill); // Refresh again
                 if sys_guard.process(pid_to_kill).is_none() {
                     debug!(pid = %pid_to_kill, "Process terminated with SIGKILL");
                     Ok(KillProcessResult {

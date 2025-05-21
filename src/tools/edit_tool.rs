@@ -1,15 +1,16 @@
 use crate::config::Config;
 use crate::error::AppError;
 use crate::tools::filesystem_tool::{FilesystemManager, ReadFileParams, WriteFileParams, WriteMode};
+use crate::utils::audit_logger::AuditLogger; // Added for logging
 use crate::utils::fuzzy_search_logger::{FuzzySearchLogger, FuzzySearchLogEntry};
-use crate::utils::line_ending_handler::{detect_line_ending, normalize_line_endings, LineEndingStyle};
+use crate::utils::line_ending_handler::{detect_line_ending, normalize_line_endings}; // Removed LineEndingStyle as it's used internally
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::{Arc, Mutex as StdMutex}; // Changed to StdMutex for FuzzySearchLogger
+use std::sync::{Arc, RwLock as StdRwLock};
 use tracing::{debug, instrument, warn};
 use std::time::Instant;
-use chrono::Utc; // Added for Utc::now()
-use diff; // Added for diff::chars
+use chrono::Utc;
+use diff; // Ensure this crate is in Cargo.toml
 
 #[derive(Debug, Deserialize)]
 pub struct EditBlockParams {
@@ -38,20 +39,29 @@ pub struct FuzzyMatchDetails {
     pub log_path_suggestion: String,
 }
 
-
 const FUZZY_SIMILARITY_THRESHOLD: f64 = 0.7;
 
-#[derive(Debug)] // Added Debug
+#[derive(Debug)]
 pub struct EditManager {
-    config: Arc<StdRwLock<Config>>, // Changed to StdRwLock
+    config: Arc<StdRwLock<Config>>,
     filesystem_manager: Arc<FilesystemManager>,
-    fuzzy_logger: Arc<StdMutex<FuzzySearchLogger>>,
+    fuzzy_logger: Arc<FuzzySearchLogger>, // Changed to Arc<FuzzySearchLogger>
+    _audit_logger: Arc<AuditLogger>, // Keep audit logger if needed for other methods
 }
 
 impl EditManager {
-    pub fn new(config: Arc<StdRwLock<Config>>, filesystem_manager: Arc<FilesystemManager>) -> Self {
-        let fuzzy_logger = Arc::new(StdMutex::new(FuzzySearchLogger::new(config.clone())));
-        Self { config, filesystem_manager, fuzzy_logger }
+    pub fn new(
+        config: Arc<StdRwLock<Config>>, 
+        filesystem_manager: Arc<FilesystemManager>,
+        audit_logger: Arc<AuditLogger> // Accept AuditLogger
+    ) -> Self {
+        let fuzzy_logger = Arc::new(FuzzySearchLogger::new(config.clone()));
+        Self { 
+            config, 
+            filesystem_manager, 
+            fuzzy_logger,
+            _audit_logger: audit_logger,
+        }
     }
 
     #[instrument(skip(self, params), fields(file_path = %params.file_path))]
@@ -62,17 +72,16 @@ impl EditManager {
             return Err(AppError::EditError("Search string (old_string) cannot be empty.".to_string()));
         }
 
-        let file_path_obj = Path::new(&params.file_path); // Corrected: params.file_path
+        let file_path_obj = Path::new(&params.file_path);
         let file_extension = file_path_obj.extension().unwrap_or_default().to_string_lossy().to_lowercase();
         
         let config_read_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
-
 
         let read_params = ReadFileParams {
             path: params.file_path.clone(),
             is_url: false,
             offset: 0,
-            length: Some(usize::MAX),
+            length: Some(usize::MAX), // Read full file for editing
         };
         let file_content_result = self.filesystem_manager.read_file(&read_params).await?;
         let original_content = file_content_result.text_content.ok_or_else(|| AppError::EditError("File content is not text or could not be read.".to_string()))?;
@@ -80,8 +89,8 @@ impl EditManager {
         let file_line_ending = detect_line_ending(&original_content);
         debug!(?file_line_ending, "Detected file line ending");
 
-        let normalized_old_string = normalize_line_endings(&params.old_string, file_line_ending); // Corrected: params.old_string
-        let normalized_new_string = normalize_line_endings(&params.new_string, file_line_ending); // Corrected: params.new_string
+        let normalized_old_string = normalize_line_endings(&params.old_string, file_line_ending);
+        let normalized_new_string = normalize_line_endings(&params.new_string, file_line_ending);
 
         let occurrences: Vec<_> = original_content.match_indices(&normalized_old_string).collect();
         let actual_occurrences = occurrences.len();
@@ -122,7 +131,6 @@ impl EditManager {
             });
         }
 
-
         if actual_occurrences > 0 && params.expected_replacements > 0 && actual_occurrences != params.expected_replacements {
              return Err(AppError::EditError(format!(
                 "Expected {} occurrences but found {}. Please verify 'old_string' for uniqueness or adjust 'expected_replacements'. If you want to replace all {} occurrences, set expected_replacements to {}.",
@@ -158,10 +166,10 @@ impl EditManager {
             diff_length: char_code_data.diff_length,
         };
         
-        let logger = self.fuzzy_logger.clone();
+        // Clone Arc for the spawned task
+        let logger_clone = self.fuzzy_logger.clone();
         tokio::spawn(async move {
-            let mut guard = logger.lock().expect("Failed to lock fuzzy logger");
-            if let Err(e) = guard.log(&log_entry).await {
+            if let Err(e) = logger_clone.log(&log_entry).await { // Call log on Arc<FuzzySearchLogger>
                  tracing::error!("Failed to log fuzzy search entry: {}", e);
             }
         });
@@ -173,7 +181,6 @@ impl EditManager {
             log_path_suggestion: config_read_guard.fuzzy_search_log_file.display().to_string(),
         };
         drop(config_read_guard);
-
 
         if similarity >= FUZZY_SIMILARITY_THRESHOLD {
             warn!(similarity, "Fuzzy match found, but not applied automatically.");
@@ -201,35 +208,35 @@ fn find_best_fuzzy_match(text: &str, query: &str) -> (String, f64) {
     }
 
     let mut best_similarity = 0.0;
-    let mut best_match_str = "";
+    let mut best_match_str = ""; // Use &str for slices
 
     let text_chars: Vec<char> = text.chars().collect();
-    let query_chars: Vec<char> = query.chars().collect();
+    // query_chars is not used directly in this revised logic, but length is.
     let text_len = text_chars.len();
-    let query_len = query_chars.len();
+    let query_len = query.chars().count(); // Use chars().count() for char length
     
     if query_len == 0 { return ("".to_string(), 0.0); }
 
-
-    // Consider windows slightly larger and smaller than the query length
     let min_window_len = std::cmp::max(1, query_len.saturating_sub(query_len / 4));
     let max_window_len = std::cmp::min(text_len, query_len + query_len / 4);
 
-
-    for window_len in min_window_len..=max_window_len {
-        if window_len > text_len { continue; }
-        for i in 0..=(text_len - window_len) {
-            let end_idx = i + window_len;
-            let window_str_slice: String = text_chars[i..end_idx].iter().collect();
+    for window_len_chars in min_window_len..=max_window_len {
+        if window_len_chars > text_len { continue; }
+        for i in 0..=(text_len - window_len_chars) {
+            // Get byte indices for slicing based on char indices
+            let start_byte_idx = text.char_indices().nth(i).map(|(idx, _)| idx).unwrap_or(0);
+            let end_byte_idx = text.char_indices().nth(i + window_len_chars).map(|(idx, _)| idx).unwrap_or_else(|| text.len());
             
-            let current_similarity = strsim::jaro_winkler(&window_str_slice, query);
+            let window_str_slice = &text[start_byte_idx..end_byte_idx];
+            
+            let current_similarity = strsim::jaro_winkler(window_str_slice, query);
 
             if current_similarity > best_similarity {
                 best_similarity = current_similarity;
-                best_match_str = &text[text.char_indices().nth(i).unwrap().0 .. text.char_indices().nth(end_idx).map_or(text.len(), |(idx, _)| idx)];
-
+                best_match_str = window_str_slice;
             }
-            if best_similarity > 0.99 {
+            // Optimization: if very high similarity, assume it's the best we'll find
+            if best_similarity > 0.999 { // Increased threshold for early exit
                 return (best_match_str.to_string(), best_similarity);
             }
         }
@@ -237,15 +244,14 @@ fn find_best_fuzzy_match(text: &str, query: &str) -> (String, f64) {
     (best_match_str.to_string(), best_similarity)
 }
 
-
 fn highlight_differences(expected: &str, actual: &str) -> String {
     let diff_results = diff::chars(expected, actual);
     let mut result = String::new();
-    for d_res in diff_results { // Renamed to avoid conflict
+    for d_res in diff_results {
         match d_res {
-            diff::Result::Left(l) => result.push_str(&format!("{{-{}-}}", l)),
-            diff::Result::Both(l, _) => result.push_str(l),
-            diff::Result::Right(r) => result.push_str(&format!("{{+{}+}}", r)),
+            diff::Result::Left(l) => result.push_str(&format!("{{-{}-}}", l)), // l is char, format needs &str
+            diff::Result::Both(l, _) => result.push(l), // l is char
+            diff::Result::Right(r) => result.push_str(&format!("{{+{}+}}", r)), // r is char
         }
     }
     result
@@ -261,23 +267,34 @@ fn get_character_code_data(expected: &str, actual: &str) -> CharCodeData {
     use std::collections::HashMap;
 
     let mut prefix_len = 0;
-    let min_len = std::cmp::min(expected.len(), actual.len());
-    let expected_bytes = expected.as_bytes();
-    let actual_bytes = actual.as_bytes();
+    let min_char_len = std::cmp::min(expected.chars().count(), actual.chars().count());
+    
+    let mut expected_chars = expected.chars();
+    let mut actual_chars = actual.chars();
 
-    while prefix_len < min_len && expected_bytes[prefix_len] == actual_bytes[prefix_len] {
-        prefix_len += 1;
+    for _ in 0..min_char_len {
+        if expected_chars.next() == actual_chars.next() {
+            prefix_len +=1;
+        } else {
+            break;
+        }
     }
-
+    
+    // Reset iterators for suffix
+    expected_chars = expected.chars().rev();
+    actual_chars = actual.chars().rev();
     let mut suffix_len = 0;
-    while suffix_len < min_len - prefix_len
-        && expected_bytes[expected.len() - 1 - suffix_len] == actual_bytes[actual.len() - 1 - suffix_len]
-    {
-        suffix_len += 1;
+    for _ in 0..(min_char_len - prefix_len) {
+         if expected_chars.next() == actual_chars.next() {
+            suffix_len +=1;
+        } else {
+            break;
+        }
     }
+    
+    let expected_diff_str: String = expected.chars().skip(prefix_len).take(expected.chars().count() - prefix_len - suffix_len).collect();
+    let actual_diff_str: String = actual.chars().skip(prefix_len).take(actual.chars().count() - prefix_len - suffix_len).collect();
 
-    let expected_diff_str = &expected[prefix_len..expected.len() - suffix_len];
-    let actual_diff_str = &actual[prefix_len..actual.len() - suffix_len];
 
     let mut char_codes: HashMap<u32, usize> = HashMap::new();
     let full_diff_str = format!("{}{}", expected_diff_str, actual_diff_str);
@@ -290,13 +307,12 @@ fn get_character_code_data(expected: &str, actual: &str) -> CharCodeData {
         .iter()
         .map(|(&code, &count)| {
             let char_display = std::char::from_u32(code)
-                .map(|c| if c.is_control() || c.is_whitespace() && c != ' ' { format!("\\x{:02x}", code) } else { c.to_string() })
+                .map(|c| if c.is_control() || (c.is_whitespace() && c != ' ') { format!("\\x{:02x}", code) } else { c.to_string() })
                 .unwrap_or_else(|| format!("\\u{{{:x}}}", code));
             format!("{}:{}[{}]", code, count, char_display)
         })
         .collect();
     report_parts.sort();
-
 
     CharCodeData {
         report: report_parts.join(","),

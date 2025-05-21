@@ -2,9 +2,9 @@ use crate::config::Config;
 use crate::error::AppError;
 use crate::utils::path_utils::validate_path_access;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf; // Removed Path as not directly used
+use std::path::PathBuf;
 use std::process::Stdio as StdProcessStdio;
-use std::sync::{Arc, RwLock as StdRwLock}; // Changed to StdRwLock for Config
+use std::sync::{Arc, RwLock as StdRwLock};
 use tokio::process::Command as TokioCommand;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, instrument, warn};
@@ -18,8 +18,8 @@ pub struct SearchCodeParams {
     pub fixed_strings: bool,
     #[serde(default, alias = "ignoreCase")]
     pub ignore_case: bool,
-    #[serde(default)] // Added default for case_sensitive
-    pub case_sensitive: bool, // Added this field
+    #[serde(default)]
+    pub case_sensitive: bool,
     #[serde(default = "default_true", alias = "lineNumbers")]
     pub line_numbers: bool,
     #[serde(alias = "contextLines")]
@@ -38,7 +38,6 @@ pub struct SearchCodeParams {
 
 fn default_true() -> bool { true }
 fn default_usize_1000() -> usize { 1000 }
-
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RipgrepMatch {
@@ -60,17 +59,17 @@ pub struct SearchStats {
     pub elapsed_ms: u64,
 }
 
-#[derive(Debug)] // Added Debug
+#[derive(Debug)]
 pub struct RipgrepSearcher {
-    config: Arc<StdRwLock<Config>>, // Changed to StdRwLock
+    config: Arc<StdRwLock<Config>>,
     rg_path: PathBuf,
 }
 
 impl RipgrepSearcher {
-    pub fn new(config: Arc<StdRwLock<Config>>) -> Self { // Changed to StdRwLock
+    pub fn new(config: Arc<StdRwLock<Config>>) -> Self {
         let rg_path = which::which("rg").unwrap_or_else(|_| {
             warn!("ripgrep (rg) not found in PATH. search_code tool will not function.");
-            PathBuf::from("rg")
+            PathBuf::from("rg") // Use a default, it will fail at runtime if not found
         });
         Self { config, rg_path }
     }
@@ -84,8 +83,7 @@ impl RipgrepSearcher {
         
         let config_guard = self.config.read().map_err(|_| AppError::ConfigError(anyhow::anyhow!("Config lock poisoned")))?;
 
-
-        let search_dir_str = if params.path.is_empty() {
+        let search_dir_str = if params.path.is_empty() || params.path == "." {
             config_guard.files_root.to_str().unwrap_or(".").to_string()
         } else {
             params.path.clone()
@@ -96,7 +94,12 @@ impl RipgrepSearcher {
         let start_time = std::time::Instant::now();
         let mut cmd = TokioCommand::new(&self.rg_path);
 
-        cmd.current_dir(&config_guard.files_root);
+        // Set current_dir relative to files_root if search_path_validated is relative,
+        // or use search_path_validated if it's absolute and within files_root.
+        // Ripgrep itself handles pathing relative to its CWD or absolute paths.
+        // We ensure search_path_validated is always absolute and allowed.
+        // cmd.current_dir(&config_guard.files_root); // This might be too restrictive if search_path_validated is deep.
+                                                   // Ripgrep will handle paths correctly if they are absolute.
 
         cmd.arg("--json"); 
         if params.line_numbers {
@@ -106,19 +109,22 @@ impl RipgrepSearcher {
             cmd.arg("-F");
         }
         
-        // Ripgrep logic: -s (case-sensitive) overrides -i (ignore-case). Smart case is default.
         if params.case_sensitive {
-            cmd.arg("-s");
-        } else if params.ignore_case { // Only apply ignore_case if case_sensitive is false
-            cmd.arg("-i");
+            cmd.arg("-s"); // Case-sensitive
+        } else if params.ignore_case {
+            cmd.arg("-i"); // Ignore-case
         }
-
+        // If neither, ripgrep uses smart-case by default.
 
         if let Some(context) = params.context_lines {
-            cmd.arg("-C").arg(context.to_string());
+            if context > 0 { // rg -C 0 is a no-op or error depending on version
+                cmd.arg("-C").arg(context.to_string());
+            }
         }
-        if let Some(glob) = &params.file_pattern { // Corrected: &params.file_pattern
-            cmd.arg("-g").arg(glob);
+        if let Some(glob) = &params.file_pattern {
+            if !glob.is_empty() {
+                cmd.arg("-g").arg(glob);
+            }
         }
         if let Some(depth) = params.max_depth {
             cmd.arg("--max-depth").arg(depth.to_string());
@@ -128,14 +134,14 @@ impl RipgrepSearcher {
             cmd.arg("--hidden");
         }
         
-        cmd.arg(&params.pattern); // Corrected: params.pattern
-        cmd.arg(&search_path_validated);
+        cmd.arg(&params.pattern);
+        cmd.arg(&search_path_validated); // Pass the validated, absolute path
 
         cmd.stdout(StdProcessStdio::piped());
         cmd.stderr(StdProcessStdio::piped());
         
-        let files_root_clone_for_path_processing = config_guard.files_root.clone(); // Clone for use in parsing
-        drop(config_guard); // Release lock
+        let files_root_clone_for_path_processing = config_guard.files_root.clone();
+        drop(config_guard);
 
         debug!("Executing rg command: {:?}", cmd);
         
@@ -158,7 +164,7 @@ impl RipgrepSearcher {
             Ok(Ok(output)) => {
                 let elapsed_ms = start_time.elapsed().as_millis() as u64;
 
-                if !output.status.success() && output.status.code() != Some(1) {
+                if !output.status.success() && output.status.code() != Some(1) { // Code 1 means matches found but some errors (e.g. permission denied on a file)
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     error!("Ripgrep command failed with status {:?}: {}", output.status, stderr);
                     return Err(AppError::RipgrepError(format!(
@@ -179,52 +185,41 @@ impl RipgrepSearcher {
                     if line_str.trim().is_empty() { continue; }
                     match serde_json::from_str::<serde_json::Value>(line_str) {
                         Ok(json_val) => {
-                            if json_val.get("type").and_then(|t| t.as_str()) == Some("match") {
-                                if let Some(data) = json_val.get("data") {
-                                    let path_text = data.get("path").and_then(|p| p.get("text")).and_then(|t| t.as_str()).unwrap_or_default();
-                                    let line_num = data.get("line_number").and_then(|n| n.as_u64()).unwrap_or(0);
-                                    
-                                    let mut full_match_line = String::new();
+                            let entry_type = json_val.get("type").and_then(|t| t.as_str());
+                            if let Some(data) = json_val.get("data") {
+                                let path_text = data.get("path").and_then(|p| p.get("text")).and_then(|t| t.as_str()).unwrap_or_default();
+                                let line_num = data.get("line_number").and_then(|n| n.as_u64()).unwrap_or(0);
+                                
+                                let mut match_line_content = String::new();
+                                if entry_type == Some("match") {
                                     if let Some(submatches_array) = data.get("submatches").and_then(|s| s.as_array()) {
-                                        for submatch_obj in submatches_array {
+                                        for submatch_obj in submatches_array { // Iterate over submatches
                                             if let Some(match_text_val) = submatch_obj.get("match").and_then(|m| m.get("text")) {
-                                                full_match_line.push_str(match_text_val.as_str().unwrap_or(""));
+                                                match_line_content.push_str(match_text_val.as_str().unwrap_or(""));
                                             }
                                         }
-                                    } else if let Some(lines_text_val) = data.get("lines").and_then(|l| l.get("text")) {
-                                        full_match_line.push_str(lines_text_val.as_str().unwrap_or(""));
                                     }
-
-                                    let absolute_match_path = files_root_clone_for_path_processing.join(path_text);
-                                    let display_path = match absolute_match_path.strip_prefix(&files_root_clone_for_path_processing) {
-                                        Ok(p) => p.to_string_lossy().into_owned(),
-                                        Err(_) => path_text.to_string(),
-                                    };
-
-                                    matches.push(RipgrepMatch {
-                                        file: display_path,
-                                        line: line_num,
-                                        match_text: full_match_line.trim_end().to_string(),
-                                    });
                                     matched_lines_count += 1;
+                                } else if entry_type == Some("context") {
+                                     if let Some(lines_text_val) = data.get("lines").and_then(|l| l.get("text")) {
+                                        match_line_content.push_str(lines_text_val.as_str().unwrap_or(""));
+                                    }
+                                } else {
+                                    continue; // Skip other types like "begin", "end" unless needed
                                 }
-                            } else if json_val.get("type").and_then(|t| t.as_str()) == Some("context") && params.context_lines.unwrap_or(0) > 0 {
-                                 if let Some(data) = json_val.get("data") {
-                                    let path_text = data.get("path").and_then(|p| p.get("text")).and_then(|t| t.as_str()).unwrap_or_default();
-                                    let line_num = data.get("line_number").and_then(|n| n.as_u64()).unwrap_or(0);
-                                    let context_line_text = data.get("lines").and_then(|l| l.get("text")).and_then(|t| t.as_str()).unwrap_or_default();
 
-                                    let absolute_match_path = files_root_clone_for_path_processing.join(path_text);
-                                    let display_path = match absolute_match_path.strip_prefix(&files_root_clone_for_path_processing) {
-                                        Ok(p) => p.to_string_lossy().into_owned(),
-                                        Err(_) => path_text.to_string(),
-                                    };
-                                    matches.push(RipgrepMatch {
-                                        file: display_path,
-                                        line: line_num,
-                                        match_text: context_line_text.trim_end().to_string(),
-                                    });
-                                 }
+
+                                let absolute_match_path = PathBuf::from(path_text); // rg gives absolute paths or paths relative to CWD
+                                let display_path = match absolute_match_path.strip_prefix(&files_root_clone_for_path_processing) {
+                                    Ok(p) => p.to_string_lossy().into_owned(),
+                                    Err(_) => path_text.to_string(), // Fallback to original path if not under root (should be filtered by rg path arg)
+                                };
+
+                                matches.push(RipgrepMatch {
+                                    file: display_path,
+                                    line: line_num,
+                                    match_text: match_line_content.trim_end().to_string(),
+                                });
                             }
                         }
                         Err(e) => {
@@ -242,8 +237,8 @@ impl RipgrepSearcher {
                     timed_out: false,
                 })
             },
-            Ok(Err(app_error)) => Err(app_error),
-            Err(_) => {
+            Ok(Err(app_error)) => Err(app_error), // Propagate AppError
+            Err(_) => { // Timeout error
                 let elapsed_ms = start_time.elapsed().as_millis() as u64;
                 warn!(pattern = %params.pattern, path = %params.path, timeout = timeout_duration.as_millis(), "Ripgrep search timed out");
                 Ok(SearchCodeResult {

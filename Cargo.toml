@@ -11,6 +11,7 @@ rust-mcp-sdk = "0.2.6"
 rust-mcp-schema = "0.4.0"
 rust-mcp-transport = "0.2.3" # Ensure this version aligns with rust-mcp-sdk if it has its own sse feature
 async-trait = "0.1.88"
+dunce = "1.0.4"
 
 # Core functionality
 tokio = { version = "1.37.0", features = ["full"] }
