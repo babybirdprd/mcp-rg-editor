@@ -1,3 +1,4 @@
+// FILE: src/config.rs
 use anyhow::{Context, Result};
 use regex::Regex;
 use shellexpand;
@@ -42,7 +43,7 @@ impl FromStr for TransportMode {
 
 fn expand_tilde(path_str: &str) -> Result<PathBuf, anyhow::Error> {
     shellexpand::tilde(path_str)
-        .map(|cow_str| PathBuf::from(cow_str.as_ref())) // Corrected: Use .as_ref()
+        .map(|cow_str| PathBuf::from(cow_str.as_ref())) 
         .map_err(|e| anyhow::anyhow!("Failed to expand tilde for path '{}': {}", path_str, e))
 }
 
@@ -71,7 +72,7 @@ impl Config {
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty())
                 .map(|s| expand_tilde(s))
-                .filter_map(Result::ok) // Convert Result<PathBuf, _> to Option<PathBuf>
+                .filter_map(Result::ok) 
                 .filter_map(|p| p.canonicalize().ok().or_else(|| if p.is_absolute() { Some(p) } else { None }))
                 .collect()
         };
@@ -79,7 +80,6 @@ impl Config {
         let is_files_root_broad = files_root == PathBuf::from("/") || 
                                 (cfg!(windows) && Regex::new(r"^[a-zA-Z]:[\\/]?$").unwrap().is_match(files_root.to_str().unwrap_or_default()));
 
-        // Ensure files_root itself is considered allowed if not globally permissive
         if !is_files_root_broad {
             if !allowed_directories.iter().any(|ad| ad == &files_root) {
                 allowed_directories.push(files_root.clone());
@@ -95,7 +95,6 @@ impl Config {
             .split(',')
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
-            // Regex to match command at the start, possibly after env vars (VAR=val cmd)
             .map(|s| Regex::new(&format!(r"^(?:[a-zA-Z_][a-zA-Z0-9_]*=[^ ]* )*{}(?:\s.*|$)", regex::escape(s))).context(format!("Invalid regex for blocked command: {}", s)))
             .collect::<Result<Vec<Regex>>>()?;
 
@@ -119,14 +118,14 @@ impl Config {
         
         let log_dir_base_str = std::env::var("MCP_LOG_DIR").unwrap_or_else(|_| "~/.mcp-logs".to_string());
         let log_dir_base = expand_tilde(&log_dir_base_str)
-            .unwrap_or_else(|_| files_root.join(".mcp-logs")); // Fallback if tilde expansion fails
+            .unwrap_or_else(|_| files_root.join(".mcp-logs")); 
 
         let audit_log_file = log_dir_base.join("tool_calls.log");
         let audit_log_max_size_bytes = std::env::var("AUDIT_LOG_MAX_SIZE_MB")
             .unwrap_or_else(|_| "10".to_string())
             .parse::<u64>()
-            .map(|mb| mb * 1024 * 1024) // Convert MB to Bytes
-            .unwrap_or(10 * 1024 * 1024); // Default to 10MB
+            .map(|mb| mb * 1024 * 1024) 
+            .unwrap_or(10 * 1024 * 1024); 
         let fuzzy_search_log_file = log_dir_base.join("fuzzy-search.log");
 
 

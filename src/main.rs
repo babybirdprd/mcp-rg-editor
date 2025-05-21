@@ -8,18 +8,16 @@ mod utils;
 use crate::config::{Config, TransportMode};
 use crate::mcp::handler::EnhancedServerHandler;
 use anyhow::Result;
-// McpServer trait is not used for `start` directly on runtime/server instances
-// use rust_mcp_sdk::McpServer; 
 use rust_mcp_schema::{InitializeResult, Implementation, ServerCapabilities, ServerCapabilitiesTools, LATEST_PROTOCOL_VERSION};
 use rust_mcp_transport::{StdioTransport, TransportOptions};
-use rust_mcp_sdk::error::McpSdkError; // Corrected import path for McpSdkError
+use rust_mcp_sdk::error::McpSdkError;
 use tracing::Level;
 use tracing_subscriber::{filter::EnvFilter, FmtSubscriber, fmt::format::FmtSpan};
 
 #[cfg(feature = "sse")]
-use rust_mcp_sdk::hyper_servers::hyper_server::{create_server as create_sse_server, HyperServerOptions, HyperServer}; // Corrected import path
+use rust_mcp_sdk::mcp_server::hyper_server::{create_server as create_sse_server, HyperServerOptions, HyperServer}; // Corrected import path
 #[cfg(feature = "stdio")]
-use rust_mcp_sdk::mcp_runtimes::server_runtime::{create_server as create_stdio_server, ServerRuntime}; // Corrected import path
+use rust_mcp_sdk::mcp_server::server_runtime::{create_server as create_stdio_server, ServerRuntime}; // Corrected import path
 
 
 fn setup_logging(log_level_str: &str) {
@@ -38,11 +36,11 @@ fn setup_logging(log_level_str: &str) {
     let subscriber = FmtSubscriber::builder()
         .with_env_filter(env_filter)
         .with_target(true)
-        .with_ansi(false) // Typically false for JSON logs or non-tty stderr
+        .with_ansi(false) 
         .with_writer(std::io::stderr)
         .with_level(true)
-        .with_span_events(FmtSpan::CLOSE) // Log when spans close
-        .json() // Use JSON output for structured logging
+        .with_span_events(FmtSpan::CLOSE) 
+        .json() 
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)
@@ -57,8 +55,8 @@ fn get_server_details() -> InitializeResult {
         },
         capabilities: ServerCapabilities {
             tools: Some(ServerCapabilitiesTools { list_changed: None }),
-            resources: Some(Default::default()), // Indicate resource support
-            prompts: Some(Default::default()),   // Indicate prompt support
+            resources: Some(Default::default()), 
+            prompts: Some(Default::default()),   
             ..Default::default()
         },
         meta: None,
@@ -107,19 +105,15 @@ async fn main() -> Result<()> {
             let sse_options = HyperServerOptions {
                 host: initial_config.sse_host.clone(),
                 port: initial_config.sse_port,
-                enable_cors: true, // Example: enable CORS
-                // ssl_config: None, // Add SSL config here if needed
+                enable_cors: true, 
                 ..Default::default()
             };
             let sse_server_runtime: HyperServer<_> = create_sse_server(server_details, handler, sse_options);
             sse_server_runtime.start().await.map_err(map_mcp_sdk_error).await?;
         }
-        #[cfg(not(all(feature = "stdio", feature = "sse")))] // Handle cases where one might be disabled
-        #[allow(unreachable_patterns)] // Allow if only one feature is enabled
+        #[cfg(not(all(feature = "stdio", feature = "sse")))] 
+        #[allow(unreachable_patterns)] 
         _ => {
-            // This case should ideally not be reached if features are managed correctly.
-            // If stdio is the only enabled feature and MCP_TRANSPORT=sse, it's an error.
-            // If sse is the only enabled feature and MCP_TRANSPORT=stdio, it's an error.
             let available_feature = if cfg!(feature = "stdio") { "stdio" } else if cfg!(feature = "sse") { "sse" } else { "none" };
             tracing::error!(
                 selected_transport = ?initial_config.transport_mode,

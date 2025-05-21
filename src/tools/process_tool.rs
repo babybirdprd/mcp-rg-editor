@@ -3,7 +3,9 @@ use crate::config::Config;
 use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock as StdRwLock};
-use sysinfo::{Pid, ProcessExt, System, SystemExt, Signal, Uid}; // Removed Gid
+use sysinfo::{Pid, Signal, Uid, System};
+use sysinfo::ProcessExt as SysinfoProcessExt; // Aliased import
+use sysinfo::SystemExt as SysinfoSystemExt;   // Aliased import
 use tracing::{instrument, debug, warn};
 use std::sync::Mutex as StdMutexForSysinfo;
 
@@ -97,7 +99,7 @@ impl ProcessManager {
             }
             
             warn!(pid = %pid_to_kill, "Process did not terminate with SIGTERM, trying SIGKILL");
-            if process.kill_with(Signal::Kill).unwrap_or(false) { // Use kill_with for sysinfo 0.30+
+            if process.kill_with(Signal::Kill).unwrap_or(false) { 
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
                 sys_guard.refresh_process(pid_to_kill); 
                 if sys_guard.process(pid_to_kill).is_none() {
