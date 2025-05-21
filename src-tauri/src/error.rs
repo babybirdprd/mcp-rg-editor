@@ -1,13 +1,15 @@
+// FILE: src-tauri/src/error.rs
+// IMPORTANT NOTE: Rewrite the entire file.
 use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Error, Debug, Serialize)]
 pub enum AppError {
     #[error("I/O error: {0}")]
-    StdIoError(String), // Store as String for Serialize
+    StdIoError(String),
 
     #[error("Tokio I/O error: {0}")]
-    TokioIoError(String), // Store as String for Serialize
+    TokioIoError(String),
 
     #[error("Ripgrep error: {0}")]
     RipgrepError(String),
@@ -22,7 +24,7 @@ pub enum AppError {
     InvalidPath(String),
 
     #[error("Configuration error: {0}")]
-    ConfigError(String), // Store as String for Serialize
+    ConfigError(String),
 
     #[error("Command execution error: {0}")]
     CommandExecutionError(String),
@@ -40,14 +42,10 @@ pub enum AppError {
     EditError(String),
 
     #[error("Serde JSON error: {0}")]
-    SerdeJsonError(String), // Store as String for Serialize
-
-    #[cfg(feature = "sse")] // This might be removed if SSE is not part of Tauri app
-    #[error("Hyper error: {0}")]
-    HyperError(String), // Store as String for Serialize
+    SerdeJsonError(String),
 
     #[error("Reqwest HTTP error: {0}")]
-    ReqwestError(String), // Store as String for Serialize
+    ReqwestError(String),
 
     #[error("Operation timed out: {0}")]
     TimeoutError(String),
@@ -64,9 +62,6 @@ pub enum AppError {
     #[error("Unknown error: {0}")]
     Unknown(String),
 }
-
-// Implement From for various error types to AppError
-// This helps in converting errors from dependencies into AppError easily using `?`
 
 impl From<std::io::Error> for AppError {
     fn from(err: std::io::Error) -> Self {
@@ -88,7 +83,7 @@ impl From<serde_json::Error> for AppError {
 
 impl From<anyhow::Error> for AppError {
     fn from(err: anyhow::Error) -> Self {
-        AppError::ConfigError(format!("{:?}", err)) // Or a more specific variant
+        AppError::ConfigError(format!("{:?}", err))
     }
 }
 

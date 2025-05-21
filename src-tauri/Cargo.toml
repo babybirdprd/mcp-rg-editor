@@ -1,56 +1,79 @@
+// FILE: src-tauri/Cargo.toml
+// IMPORTANT NOTE: Rewrite the entire file.
 [package]
-name = "mcp-rg-editor-tauri" # Renamed
+name = "mcp-rg-editor-tauri"
 version = "0.1.0"
-description = "Desktop Commander Enhanced - Tauri Edition"
-authors = ["Your Name"] # Update author
+description = "Desktop Commander Enhanced - Tauri Edition (MCP Server)"
+authors = ["Babybird"]
 edition = "2021"
+rust-version = "1.70"
 
 [lib]
-name = "mcp_rg_editor_tauri_lib" # Unique lib name
+name = "mcp_rg_editor_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.2.0", features = [] } # Use latest v2 beta or RC
+tauri-build = { version = "2.0.0-beta.20", features = [] }
 
 [dependencies]
-tauri = { version = "2.5.1", features = ["devtools", "process-command-api", "global-shortcut-api", "clipboard-manager", "dialog", "fs-extract-api", "http-api", "notification", "shell-open-api"] } # Check latest v2 beta/RC and enable necessary API features
+# Tauri Core & Essential Plugins
+tauri = { version = "2.0.0-beta.20", features = ["devtools", "global-shortcut-api", "clipboard-manager", "dialog", "process-command-api", "fs-extract-api", "http-api", "notification", "shell-open-api"] }
 tauri-plugin-fs = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 tauri-plugin-shell = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 tauri-plugin-process = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 tauri-plugin-http = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 tauri-plugin-dialog = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 tauri-plugin-log = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
-tauri-plugin-notification = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" } # For potential future use
+tauri-plugin-notification = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2.0.12" # Simplified version, original was 2.0.12
-anyhow = "1.0"
+# MCP SDK Dependencies
+rust-mcp-sdk = "0.2.6" # As per your provided rust-mcp-sdk-llms.txt
+rust-mcp-schema = "0.4.0" # As per your provided rust-mcp-sdk-llms.txt
+rust-mcp-transport = "0.2.3" # As per your provided rust-mcp-sdk-llms.txt
+async-trait = "0.1.80" # Updated version, check compatibility if issues arise
+
+# Serde
+serde = { version = "1.0.203", features = ["derive"] }
+serde_json = "1.0.117"
+
+# Error Handling
+thiserror = "1.0.63"
+anyhow = "1.0.86"
 
 # Configuration & Logging
-dotenvy = "0.15"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+dotenvy = "0.15.7"
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json", "fmt"] }
 
-# Utilities from original mcp-rg-editor
-which = "6.0.3" # Original was 7.0.3, check compatibility or update
-uuid = { version = "1.8", features = ["v4"] }
-strsim = "0.11"
-sysinfo = "0.30" # Original was 0.35.1, check compatibility or update
-regex = "1.10"
-shellexpand = "3.1"
-chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.12", features = ["json", "stream"] } # For URL reading if http plugin isn't sufficient
-base64 = "0.22"
-mime_guess = "2.0"
-diff = "0.1"
-dunce = "1.0"
-tokio = { version = "1.37", features = ["full"] } # For async runtime, process management
-once_cell = "1.19" # Often useful with Tauri
+# Utilities from original mcp-rg-editor (ensure versions are compatible)
+which = "6.0.1"
+uuid = { version = "1.10.0", features = ["v4", "serde"] }
+strsim = "0.11.1"
+sysinfo = "0.30.12" # Check for API changes from 0.35.1
+regex = "1.10.5"
+shellexpand = "3.1.0"
+chrono = { version = "0.4.38", features = ["serde"] }
+reqwest = { version = "0.12.5", features = ["json", "stream"] } # May still be useful for some URL tasks
+base64 = "0.22.1"
+mime_guess = "2.0.5"
+diff = "0.1.13"
+dunce = "1.0.4"
+tokio = { version = "1.38.1", features = ["full"] }
+once_cell = "1.19.0"
+
+# For MCP SSE Server (if enabled)
+axum = { version = "0.7.5", optional = true } # rust-mcp-sdk might bring its own hyper/axum
+hyper = { version = "1.4.1", features = ["full"], optional = true }
+tower-http = { version = "0.5.2", features = ["fs", "trace", "cors"], optional = true }
+
 
 [features]
-default = ["custom-protocol"]
+default = ["custom-protocol", "mcp-stdio-server"] # Default to STDIO MCP server
 custom-protocol = ["tauri/custom-protocol"]
+
+# MCP Server features
+mcp-stdio-server = []
+mcp-sse-server = ["axum", "hyper", "tower-http", "rust-mcp-sdk/hyper-server"] # Enable if SSE transport is desired for MCP
 
 [profile.release]
 panic = "abort"

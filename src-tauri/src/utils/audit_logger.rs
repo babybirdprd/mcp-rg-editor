@@ -1,3 +1,5 @@
+// FILE: src-tauri/src/utils/audit_logger.rs
+// IMPORTANT NOTE: Rewrite the entire file.
 use crate::config::Config;
 use anyhow::Result;
 use chrono::Utc;
@@ -20,10 +22,11 @@ impl AuditLogger {
         let config_guard = config_state.read().unwrap();
         let log_file_path = config_guard.audit_log_file.clone();
         let max_size_bytes = config_guard.audit_log_max_size_bytes;
+        drop(config_guard);
 
         if let Some(parent_dir) = log_file_path.parent() {
             if !parent_dir.exists() {
-                if let Err(e) = std::fs::create_dir_all(parent_dir) { // Use std::fs for sync creation
+                if let Err(e) = std::fs::create_dir_all(parent_dir) {
                     error!(path = %parent_dir.display(), error = %e, "Failed to create audit log directory");
                 }
             }
@@ -74,10 +77,9 @@ impl AuditLogger {
 
         let mut sanitized_args = arguments.clone();
         if let Some(obj) = sanitized_args.as_object_mut() {
-            // Sanitize sensitive fields like 'content', 'old_string', 'new_string'
-            for key_to_sanitize in ["content", "old_string", "new_string", "command"] {
+            for key_to_sanitize in ["content", "old_string", "new_string", "command", "pattern"] { // Added "pattern"
                 if let Some(val_mut) = obj.get_mut(key_to_sanitize) {
-                    if val_mut.is_string() && val_mut.as_str().unwrap_or("").len() > 256 { // Reduced length for logs
+                    if val_mut.is_string() && val_mut.as_str().unwrap_or("").len() > 256 {
                         *val_mut = Value::String(format!("<{} truncated for log>", key_to_sanitize));
                     }
                 }
@@ -98,11 +100,10 @@ impl AuditLogger {
     }
 }
 
-// Wrapper function to be called from commands easily
 pub async fn audit_log(
-    logger: State<'_, Arc<AuditLogger>>,
+    logger_state: &State<'_, Arc<AuditLogger>>, // Borrow State directly
     command_name: &str,
     arguments: &Value,
 ) {
-    logger.inner().log_command_call(command_name, arguments).await;
+    logger_state.inner().log_command_call(command_name, arguments).await;
 }

@@ -1,18 +1,11 @@
-"use client";
-import { Geist_Sans } from "geist/font/sans"; // Corrected import if using Geist Vercel
-import { Geist_Mono } from "geist/font/mono"; // Corrected import
+// FILE: src/app/layout.tsx
+// IMPORTANT NOTE: Rewrite the entire file.
+"use client"; // Required for client-side hooks and context
+
+import { Geist_Sans } from "geist/font/sans";
+import { Geist_Mono } from "geist/font/mono";
 import "@/styles/globals.css";
-import { Toaster } from "@/components/ui/toaster"; // Import Toaster
-
-// const geistSans = Geist({ // Original from template, might differ from Geist Vercel pkg
-//   variable: "--font-geist-sans",
-//   subsets: ["latin"],
-// });
-
-// const geistMono = Geist_Mono({
-//   variable: "--font-geist-mono",
-//   subsets: ["latin"],
-// });
+import { Toaster } from "@/components/ui/toaster"; // Assuming Shadcn UI Toaster
 
 export default function RootLayout({
   children,
@@ -20,10 +13,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${Geist_Sans.variable} ${Geist_Mono.variable}`}> {/* Use classes directly if using geist/font */}
+    <html lang="en" className={`${Geist_Sans.variable} ${Geist_Mono.variable}`}>
       <body>
-        {children}
-        <Toaster /> {/* Add Toaster here for global availability */}
+        <main className="min-h-screen"> {/* Ensure main content area can grow */}
+          {children}
+        </main>
+        <Toaster /> {/* Global Toaster for notifications */}
       </body>
     </html>
   );

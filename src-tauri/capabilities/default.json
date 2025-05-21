@@ -16,13 +16,33 @@
     "shell:allow-open",
     {
       "identifier": "shell:allow-execute",
-      "allow": []
+      "allow": [
+        { "name": "rg", "cmd": "rg", "args": true, "sidecar": false },
+        { "name": "sh", "cmd": "sh", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
+        { "name": "bash", "cmd": "bash", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
+        { "name": "powershell", "cmd": "powershell", "args": ["-Command", { "validator": "\\S+" }], "sidecar": false },
+        { "name": "cmd", "cmd": "cmd", "args": ["/C", { "validator": "\\S+" }], "sidecar": false }
+      ]
     },
     "fs:default",
     "fs:allow-app-read",
     "fs:allow-app-write",
     "fs:allow-app-data-read",
     "fs:allow-app-data-write",
+    "fs:allow-app-log-read",
+    "fs:allow-app-log-write",
+    "fs:allow-app-config-read",
+    "fs:allow-app-config-write",
+    "fs:allow-app-cache-read",
+    "fs:allow-app-cache-write",
+    "fs:allow-desktop-read",
+    "fs:allow-desktop-write",
+    "fs:allow-document-read",
+    "fs:allow-document-write",
+    "fs:allow-download-read",
+    "fs:allow-download-write",
+    "fs:allow-home-read",
+    "fs:allow-home-write",
     "process:default",
     "http:default",
     "http:allow-fetch",
@@ -32,11 +52,26 @@
   ],
   "globalScope": {
     "fs": {
-       "allow": []
+      "allow": [
+        "$APPCONFIG/**",
+        "$APPLOG/**",
+        "$APPDATA/**",
+        "$APPCACHE/**",
+        "$DESKTOP/**",
+        "$DOCUMENT/**",
+        "$DOWNLOAD/**",
+        "$HOME/**"
+      ]
     },
     "shell": {
       "execute": {
-        "allow": []
+        "allow": [
+          { "name": "rg", "cmd": "rg", "args": true, "sidecar": false },
+          { "name": "sh", "cmd": "sh", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
+          { "name": "bash", "cmd": "bash", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
+          { "name": "powershell", "cmd": "powershell", "args": ["-Command", { "validator": "\\S+" }], "sidecar": false },
+          { "name": "cmd", "cmd": "cmd", "args": ["/C", { "validator": "\\S+" }], "sidecar": false }
+        ]
       }
     }
   }

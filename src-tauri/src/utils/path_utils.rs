@@ -1,6 +1,8 @@
+// FILE: src-tauri/src/utils/path_utils.rs
+// IMPORTANT NOTE: Rewrite the entire file.
 use crate::config::Config;
 use crate::error::AppError;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use anyhow::Result;
 use tracing::debug;
 use std::sync::RwLockReadGuard;
@@ -12,125 +14,152 @@ pub fn expand_tilde_path_buf(path_str: &str) -> Result<PathBuf, AppError> {
         .map_err(|e| AppError::InvalidPath(format!("Failed to expand tilde for path '{}': {}", path_str, e)))
 }
 
-fn normalize_path_within_root(path_str: &str, files_root: &Path) -> Result<PathBuf, AppError> {
+/// Normalizes a path: expands tilde, makes it absolute relative to files_root if it's relative,
+/// and then attempts to canonicalize it. Falls back to the absolute path if canonicalization fails.
+fn normalize_path_base(path_str: &str, files_root: &Path) -> Result<PathBuf, AppError> {
     let expanded_path = expand_tilde_path_buf(path_str)?;
 
     let mut absolute_path = if expanded_path.is_absolute() {
         expanded_path
     } else {
-        // If relative, join with files_root FIRST, then attempt canonicalization
         files_root.join(expanded_path)
     };
 
     // Attempt to canonicalize. If it fails (e.g. path doesn't exist), use the constructed absolute path.
     // dunce::canonicalize is good for UNC paths on Windows.
-    let canonical_path = dunce::canonicalize(&absolute_path).unwrap_or_else(|_| absolute_path.clone());
-
-    // Final check: ensure no ".." components escape the files_root after all normalization.
-    // This is a simplified check; a more robust one would iterate through components.
-    if !canonical_path.starts_with(files_root) && files_root != Path::new("/") && !(cfg!(windows) && files_root.parent().is_none() && files_root.is_absolute()) {
-         // Allow if files_root is "/" or a drive root like "C:\"
-        if !(files_root == Path::new("/") || (cfg!(windows) && files_root.parent().is_none() && files_root.is_absolute())) {
-             debug!(normalized_path = %canonical_path.display(), root = %files_root.display(), "Path normalization resulted in path outside root");
-            // return Err(AppError::PathTraversal(format!(
-            //     "Normalized path {} is outside of the files_root {}",
-            //     canonical_path.display(),
-            //     files_root.display()
-            // )));
-            // For now, we let the validate_path_access handle this specific check more granularly with allowed_directories.
+    match dunce::canonicalize(&absolute_path) {
+        Ok(canonical_path) => Ok(canonical_path),
+        Err(_) => {
+            // If canonicalization fails, it might be because the path (or parts of it) doesn't exist.
+            // We still want to return an "absolute" form for validation against allowed_directories.
+            // This simplified normalization removes ".." and "." components.
+            let mut components = Vec::new();
+            for component in absolute_path.components() {
+                match component {
+                    std::path::Component::ParentDir => {
+                        if let Some(std::path::Component::Normal(_)) = components.last() {
+                            components.pop();
+                        } else if cfg!(unix) && components.is_empty() {
+                            // e.g. /../ -> / (let it be, root check will handle)
+                        } else if cfg!(windows) && components.len() == 1 && matches!(components.first(), Some(std::path::Component::Prefix(_))) {
+                            // e.g. C:\.. -> C:\ (let it be)
+                        } else {
+                            // Path traversal attempt if trying to go above root or an empty path stack
+                            // This case should ideally be caught by `starts_with(files_root)` later.
+                            // For now, we just don't pop if it would go "above" the current component stack.
+                        }
+                    }
+                    std::path::Component::CurDir => {} // Skip "."
+                    _ => components.push(component),
+                }
+            }
+            Ok(components.iter().collect())
         }
     }
-    Ok(canonical_path)
 }
 
-
-// Validates if a path is accessible based on FILES_ROOT and ALLOWED_DIRECTORIES
-// check_existence: if true, the path must exist.
-// for_write: if true, checks parent for write operations.
+/// Validates if a path is accessible based on FILES_ROOT and ALLOWED_DIRECTORIES.
+/// `check_existence`: if true, the final path must exist.
+/// `for_write_or_create`: if true, validates the parent directory for write/create operations,
+///                        and the final path component's validity. The final path itself might not exist.
 pub fn validate_and_normalize_path(
     target_path_str: &str,
     config_guard: &RwLockReadGuard<Config>,
     check_existence: bool,
-    for_write: bool, // If true, we validate the parent directory for write/create operations
+    for_write_or_create: bool,
 ) -> Result<PathBuf, AppError> {
-    debug!(target_path = %target_path_str, check_existence, for_write, "Validating path access");
+    debug!(target_path = %target_path_str, check_existence, for_write_or_create, "Validating path access");
 
-    let path_to_validate_str = if for_write {
-        // For writes, we are interested in the parent directory's accessibility
-        // and the final path component's validity.
-        // The final path itself might not exist yet.
-        let temp_path = expand_tilde_path_buf(target_path_str)?;
-        if let Some(parent) = temp_path.parent() {
-            parent.to_str().unwrap_or("").to_string()
-        } else {
-            // If no parent (e.g. "file.txt" in root, or "/"), validate target_path_str itself.
-            target_path_str.to_string()
-        }
+    // Normalize the target path first.
+    // If for_write_or_create, we normalize the full path to ensure the final component is valid,
+    // but existence checks later will focus on the parent if the target doesn't exist.
+    let normalized_target_path = normalize_path_base(target_path_str, &config_guard.files_root)?;
+    debug!(normalized_target_path = %normalized_target_path.display(), "Initial normalized target path");
+
+    // Determine the path to check for directory-level permissions and existence
+    let path_for_dir_checks = if for_write_or_create && !normalized_target_path.exists() {
+        normalized_target_path.parent().ok_or_else(|| AppError::InvalidPath(format!("Cannot determine parent directory for write/create: {}", normalized_target_path.display())))?.to_path_buf()
     } else {
-        target_path_str.to_string()
+        normalized_target_path.clone()
     };
+    debug!(path_for_dir_checks = %path_for_dir_checks.display(), "Path used for directory/existence checks");
 
-    let normalized_base_path = normalize_path_within_root(&path_to_validate_str, &config_guard.files_root)?;
-    let final_normalized_path = if for_write {
-        // Re-attach the filename if we validated the parent
-        let filename = PathBuf::from(target_path_str).file_name().ok_or_else(|| AppError::InvalidPath("Path has no filename component for write".to_string()))?;
-        normalized_base_path.join(filename)
-    } else {
-        normalized_base_path.clone() // Use clone of normalized_base_path
-    };
-
-
-    debug!(normalized_path = %final_normalized_path.display(), "Normalized path for validation");
 
     // 1. Check against FILES_ROOT
     let is_files_root_broad = config_guard.files_root == Path::new("/") ||
                               (cfg!(windows) && config_guard.files_root.parent().is_none() && config_guard.files_root.is_absolute());
 
-    if !is_files_root_broad && !final_normalized_path.starts_with(&config_guard.files_root) {
-        debug!(path = %final_normalized_path.display(), root = %config_guard.files_root.display(), "Path is outside files_root");
+    if !is_files_root_broad && !normalized_target_path.starts_with(&config_guard.files_root) {
+        debug!(path = %normalized_target_path.display(), root = %config_guard.files_root.display(), "Path is outside files_root");
         return Err(AppError::PathTraversal(format!(
             "Path {} is outside of the configured root directory {}",
-            final_normalized_path.display(),
+            normalized_target_path.display(),
             config_guard.files_root.display()
         )));
     }
 
     // 2. Check against ALLOWED_DIRECTORIES
+    // An allowed_directory can be a broad root like "/" or "C:\"
     let is_globally_allowed_by_config = config_guard.allowed_directories.iter().any(|ad_config_path| {
-        let normalized_ad = normalize_path_within_root(ad_config_path.to_str().unwrap_or(""), &config_guard.files_root)
-                                .unwrap_or_else(|_| ad_config_path.clone()); // Use original if normalization fails
+        let normalized_ad = normalize_path_base(ad_config_path.to_str().unwrap_or(""), &config_guard.files_root)
+                                .unwrap_or_else(|_| ad_config_path.clone());
         normalized_ad == Path::new("/") || (cfg!(windows) && normalized_ad.parent().is_none() && normalized_ad.is_absolute())
     });
 
     if is_globally_allowed_by_config {
         debug!("Access globally allowed by an allowed_directory entry like '/' or 'C:\\'");
     } else {
+        // If not globally allowed, check if the path_for_dir_checks (or normalized_target_path if not for_write_or_create)
+        // is within any of the specific allowed_directories.
+        let path_to_check_against_allowed = if for_write_or_create && !normalized_target_path.is_dir() {
+            // If writing/creating a file, check its parent dir against allowed_directories
+            normalized_target_path.parent().unwrap_or(&normalized_target_path)
+        } else {
+            // If reading, or writing/creating a directory, check the path itself
+            &normalized_target_path
+        };
+
+
         let is_specifically_allowed = config_guard.allowed_directories.iter().any(|allowed_dir_config_entry| {
-            let normalized_allowed_dir = normalize_path_within_root(allowed_dir_config_entry.to_str().unwrap_or_default(), &config_guard.files_root)
+            let normalized_allowed_dir = normalize_path_base(allowed_dir_config_entry.to_str().unwrap_or_default(), &config_guard.files_root)
                 .unwrap_or_else(|_| allowed_dir_config_entry.clone());
-            debug!(path_to_check = %final_normalized_path.display(), allowed_dir_entry = %normalized_allowed_dir.display(), "Checking against allowed directory");
-            final_normalized_path.starts_with(&normalized_allowed_dir)
+            debug!(path_to_check = %path_to_check_against_allowed.display(), allowed_dir_entry = %normalized_allowed_dir.display(), "Checking against allowed directory");
+            path_to_check_against_allowed.starts_with(&normalized_allowed_dir)
         });
 
         if !is_specifically_allowed {
-            debug!(path = %final_normalized_path.display(), allowed_dirs = ?config_guard.allowed_directories, "Path not in allowed_directories");
+            debug!(path = %normalized_target_path.display(), allowed_dirs = ?config_guard.allowed_directories, "Path not in allowed_directories");
             return Err(AppError::PathNotAllowed(format!(
-                "Path {} is not within any allowed directories. Allowed: {:?}",
-                final_normalized_path.display(), config_guard.allowed_directories
+                "Operation on path {} (or its parent) is not within any allowed directories. Allowed: {:?}",
+                normalized_target_path.display(), config_guard.allowed_directories
             )));
         }
     }
 
-    // 3. Check existence if required (and not for parent of a write op)
-    if check_existence && !for_write && !final_normalized_path.exists() {
-        return Err(AppError::InvalidPath(format!(
-            "Path does not exist: {}",
-            final_normalized_path.display()
-        )));
-    }
-    // If for_write, the parent must exist (which is implicitly checked by normalize_path_within_root if it canonicalizes)
-    // or if it doesn't canonicalize, the constructed path's parent should be valid.
-    // The tauri-plugin-fs will handle actual file creation errors.
+    // 3. Check existence if required
+    if check_existence {
+        // If for_write_or_create, we check existence of the parent dir if the target itself doesn't exist.
+        // Otherwise, we check existence of the target path itself.
+        let path_to_check_existence = if for_write_or_create && !normalized_target_path.exists() {
+            path_for_dir_checks // This is already the parent
+        } else {
+            normalized_target_path.clone()
+        };
 
-    Ok(final_normalized_path)
+        if !path_to_check_existence.exists() {
+            return Err(AppError::InvalidPath(format!(
+                "Required path (or parent for write/create) does not exist: {}",
+                path_to_check_existence.display()
+            )));
+        }
+        // If it's for_write_or_create and the parent exists, it must be a directory.
+        if for_write_or_create && !path_to_check_existence.is_dir() && path_to_check_existence != normalized_target_path {
+             return Err(AppError::InvalidPath(format!(
+                "Parent path for write/create is not a directory: {}",
+                path_to_check_existence.display()
+            )));
+        }
+    }
+
+    Ok(normalized_target_path)
 }

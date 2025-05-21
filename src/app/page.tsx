@@ -1,99 +1,85 @@
+// FILE: src/app/page.tsx
+// IMPORTANT NOTE: Rewrite the entire file.
 "use client";
-import { RoundedButton } from "@/components/RoundedButton";
+import { RoundedButton } from "@/components/RoundedButton"; // Assuming this is a custom button
 import { invoke } from "@tauri-apps/api/core";
 import Image from "next/image";
+import Link from "next/link"; // For navigation
 import { useCallback, useState } from "react";
+import { Button } from "@/components/ui/button"; // Assuming Shadcn UI Button
 
 export default function Home() {
-  const [greeted, setGreeted] = useState<string | null>(null);
-  const greet = useCallback((): void => {
-    invoke<string>("greet")
-      .then((s) => {
-        setGreeted(s);
-      })
-      .catch((err: unknown) => {
-        console.error(err);
-      });
+  const [greetMsg, setGreetMsg] = useState<string | null>(
+    "Click the button to call a Rust function!",
+  );
+  const [isLoading, setIsLoading] = useState(false);
+
+  const callGreet = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const result = await invoke<string>("greet"); // Ensure 'greet' is registered in lib.rs
+      setGreetMsg(result);
+    } catch (error) {
+      console.error("Error invoking greet:", error);
+      setGreetMsg(`Error: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
+    <div className="flex flex-col items-center justify-center min-h-screen p-4 font-[family-name:var(--font-geist-sans)]">
+      <header className="mb-8 text-center">
         <Image
-          className="dark:invert"
-          src="/next.svg"
+          className="dark:invert mx-auto mb-4"
+          src="/next.svg" // Assuming this is in public folder
           alt="Next.js logo"
           width={180}
           height={38}
           priority
         />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+        <h1 className="text-4xl font-bold">MCP-RG-Editor (Tauri Edition)</h1>
+        <p className="text-lg text-muted-foreground">
+          Enhanced Desktop Commander with Ripgrep, Filesystem, and Terminal tools.
+        </p>
+      </header>
 
-        <div className="flex flex-col gap-2 items-start">
-          <RoundedButton
-            onClick={greet}
-            title="Call &quot;greet&quot; from Rust"
-          />
-          <p className="break-words w-md">
-            {greeted ?? "Click the button to call the Rust function"}
-          </p>
+      <nav className="mb-8">
+        <Link href="/config" passHref>
+          <Button variant="outline">Go to Configuration Page</Button>
+        </Link>
+      </nav>
+
+      <section className="w-full max-w-md p-6 space-y-4 bg-card text-card-foreground rounded-lg shadow-md">
+        <h2 className="text-2xl font-semibold">Test Backend Connection</h2>
+        <p className="text-sm text-muted-foreground">
+          {greetMsg}
+        </p>
+        <Button onClick={callGreet} disabled={isLoading} className="w-full">
+          {isLoading ? "Calling..." : 'Call "greet" from Rust'}
+        </Button>
+      </section>
+
+      <footer className="mt-12 text-center text-sm text-muted-foreground">
+        <p>Powered by Tauri & Next.js</p>
+        <div className="flex justify-center gap-4 mt-2">
+          <a
+            href="https://nextjs.org/docs"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+          >
+            Next.js Docs
+          </a>
+          <a
+            href="https://tauri.app/v2/api/js/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover:underline"
+          >
+            Tauri JS API
+          </a>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
       </footer>
     </div>
   );

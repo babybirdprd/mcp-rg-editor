@@ -1,8 +1,10 @@
+// FILE: src/app/config/page.tsx
+// IMPORTANT NOTE: Rewrite the entire file.
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, ChangeEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { emit, listen } from "@tauri-apps/api/event"; // For potential future use with terminal output
+// import { emit, listen } from "@tauri-apps/api/event"; // Not used in this version
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/components/ui/use-toast";
-import { Toaster } from "@/components/ui/toaster";
+// Toaster is already in RootLayout, so not needed here unless for specific placement
 import {
   Tooltip,
   TooltipContent,
@@ -32,14 +34,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Terminal } from "lucide-react";
-
+import { Terminal } from "lucide-react"; // Assuming lucide-react is installed
 
 // Matches the Rust Config struct (subset for UI interaction)
 interface AppConfig {
   files_root: string;
-  allowed_directories: string[]; // Will be joined/split for textarea
-  blocked_commands: string[]; // Will be joined/split for textarea
+  allowed_directories: string[];
+  blocked_commands: string[];
   default_shell?: string | null;
   log_level: string;
   file_read_line_limit: number;
@@ -47,10 +48,8 @@ interface AppConfig {
   audit_log_file: string;
   fuzzy_search_log_file: string;
   mcp_log_dir: string;
-  // transport_mode, sse_host, sse_port are omitted as they are less relevant for a Tauri app UI config
 }
 
-// For editable fields
 interface EditableConfig {
   allowed_directories_str: string;
   blocked_commands_str: string;
@@ -89,14 +88,13 @@ export default function ConfigPage() {
         file_write_line_limit_str: result.file_write_line_limit.toString(),
       });
     } catch (err) {
-      console.error("Failed to fetch config:", err);
-      setError(
-        err instanceof Error ? err.message : "An unknown error occurred while fetching config.",
-      );
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error("Failed to fetch config:", errorMessage);
+      setError(errorMessage);
       toast({
         variant: "destructive",
         title: "Error Fetching Config",
-        description: err instanceof Error ? err.message : "Could not load configuration from backend.",
+        description: `Could not load configuration: ${errorMessage}`,
       });
     } finally {
       setIsLoading(false);
@@ -108,7 +106,7 @@ export default function ConfigPage() {
   }, [fetchConfig]);
 
   const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
   ) => {
     const { name, value } = e.target;
     setEditableConfig((prev) => ({ ...prev, [name]: value }));
@@ -118,29 +116,32 @@ export default function ConfigPage() {
     setEditableConfig((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleSaveSetting = async (key: string, value: any) => {
+  const handleSaveSetting = async (key: string, value: unknown) => { // value can be array, string, number, or null
     try {
+      // The Rust command expects a SetConfigValuePayload { key: String, value: Value }
+      // where Value is serde_json::Value.
       const result = await invoke<string>("set_config_value_command", {
-        payload: { key, value },
+         payload: { key, value } // Directly pass the JS value; Tauri serializes it to JSON Value
       });
       toast({
         title: "Setting Saved",
         description: result || `Successfully updated ${key}.`,
       });
-      await fetchConfig(); // Re-fetch to confirm and get any backend-validated values
+      await fetchConfig();
     } catch (err) {
-      console.error(`Failed to save setting ${key}:`, err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to save setting ${key}:`, errorMessage);
       toast({
         variant: "destructive",
         title: `Error Saving ${key}`,
-        description: err instanceof Error ? err.message : "An unknown error occurred.",
+        description: errorMessage,
       });
     }
   };
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
+      <div className="flex items-center justify-center min-h-screen p-4">
         Loading configuration...
       </div>
     );
@@ -156,40 +157,37 @@ export default function ConfigPage() {
               {error}
               <br />
               Please check the backend logs and ensure the application is running correctly.
-              You might need to set the `FILES_ROOT` environment variable.
+              You might need to set environment variables like `FILES_ROOT`.
             </AlertDescription>
           </Alert>
           <Button onClick={fetchConfig} className="mt-4">Retry</Button>
        </div>
     );
   }
-  
+
   if (!config) {
      return (
-      <div className="flex items-center justify-center min-h-screen">
-        No configuration data available.
+      <div className="flex items-center justify-center min-h-screen p-4">
+        No configuration data available. Ensure the backend is running and accessible.
       </div>
     );
   }
 
-
   return (
     <TooltipProvider>
       <div className="container mx-auto p-4 md:p-8 space-y-6">
-        <Toaster />
         <header className="mb-8">
           <h1 className="text-3xl font-bold">Application Configuration</h1>
           <p className="text-muted-foreground">
-            View and manage runtime settings for the application. Some critical settings are read-only.
+            View and manage runtime settings. Some critical settings are read-only from environment variables.
           </p>
         </header>
 
-        {/* Read-only Settings */}
         <Card>
           <CardHeader>
             <CardTitle>Core Settings (Read-only)</CardTitle>
             <CardDescription>
-              These settings are fundamental to the application's operation and are typically set via environment variables at startup.
+              Fundamental settings typically set via environment variables at startup.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -197,135 +195,66 @@ export default function ConfigPage() {
               <Label htmlFor="files_root">Files Root</Label>
               <Input id="files_root" value={config.files_root} readOnly />
                <p className="text-sm text-muted-foreground mt-1">
-                The primary directory the application operates within.
+                The primary directory the application operates within. (Env: FILES_ROOT)
               </p>
             </div>
              <div>
               <Label htmlFor="mcp_log_dir">Log Directory</Label>
               <Input id="mcp_log_dir" value={config.mcp_log_dir} readOnly />
               <p className="text-sm text-muted-foreground mt-1">
-                Directory where audit and fuzzy search logs are stored.
+                Directory for audit and fuzzy search logs. (Env: MCP_LOG_DIR or derived)
               </p>
             </div>
-            <div>
-              <Label htmlFor="audit_log_file">Audit Log File</Label>
-              <Input id="audit_log_file" value={config.audit_log_file} readOnly />
-            </div>
-            <div>
-              <Label htmlFor="fuzzy_search_log_file">Fuzzy Search Log File</Label>
-              <Input id="fuzzy_search_log_file" value={config.fuzzy_search_log_file} readOnly />
-            </div>
+            <div><Label htmlFor="audit_log_file">Audit Log File Path</Label><Input id="audit_log_file" value={config.audit_log_file} readOnly /></div>
+            <div><Label htmlFor="fuzzy_search_log_file">Fuzzy Search Log File Path</Label><Input id="fuzzy_search_log_file" value={config.fuzzy_search_log_file} readOnly /></div>
           </CardContent>
         </Card>
 
-        {/* Editable Settings */}
         <Card>
           <CardHeader>
             <CardTitle>Editable Runtime Settings</CardTitle>
             <CardDescription>
-              Changes made here are applied in-memory for the current session.
+              Changes are applied in-memory for the current session.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Allowed Directories */}
             <div className="space-y-2">
-              <Label htmlFor="allowed_directories_str">Allowed Directories</Label>
+              <Label htmlFor="allowed_directories_str">Allowed Directories (Env: ALLOWED_DIRECTORIES)</Label>
               <Tooltip>
                 <TooltipTrigger className="w-full">
-                  <Textarea
-                    id="allowed_directories_str"
-                    name="allowed_directories_str"
-                    value={editableConfig.allowed_directories_str}
-                    onChange={handleInputChange}
-                    placeholder="e.g., /path/to/project1,~/project2,C:\Users\YourUser\Documents"
-                    rows={3}
-                  />
+                  <Textarea id="allowed_directories_str" name="allowed_directories_str" value={editableConfig.allowed_directories_str} onChange={handleInputChange} placeholder="e.g., /path/project1,~/project2" rows={3}/>
                 </TooltipTrigger>
-                <TooltipContent>
-                  <p>Comma-separated list of absolute or tilde-expanded (~) paths.</p>
-                  <p>These directories must be accessible and are where filesystem tools can operate.</p>
-                  <p>An empty list defaults to FILES_ROOT. Use `/` or `C:\` for full (dangerous) access within FILES_ROOT scope.</p>
-                </TooltipContent>
+                <TooltipContent><p>Comma-separated list of absolute or tilde-expanded paths. Empty defaults to FILES_ROOT.</p></TooltipContent>
               </Tooltip>
-              <Button
-                onClick={() =>
-                  handleSaveSetting(
-                    "allowedDirectories",
-                    editableConfig.allowed_directories_str.split(",").map(s => s.trim()).filter(s => s.length > 0)
-                  )
-                }
-              >
-                Save Allowed Directories
-              </Button>
+              <Button onClick={() => handleSaveSetting("allowedDirectories", editableConfig.allowed_directories_str.split(",").map(s => s.trim()).filter(s => s))}>Save Allowed Dirs</Button>
             </div>
 
-            {/* Blocked Commands */}
             <div className="space-y-2">
-              <Label htmlFor="blocked_commands_str">Blocked Commands</Label>
+              <Label htmlFor="blocked_commands_str">Blocked Commands (Env: BLOCKED_COMMANDS)</Label>
                <Tooltip>
                 <TooltipTrigger className="w-full">
-                  <Textarea
-                    id="blocked_commands_str"
-                    name="blocked_commands_str"
-                    value={editableConfig.blocked_commands_str}
-                    onChange={handleInputChange}
-                    placeholder="e.g., rm,sudo,dd"
-                    rows={3}
-                  />
+                  <Textarea id="blocked_commands_str" name="blocked_commands_str" value={editableConfig.blocked_commands_str} onChange={handleInputChange} placeholder="e.g., rm,sudo" rows={3}/>
                 </TooltipTrigger>
-                <TooltipContent>
-                  <p>Comma-separated list of command names (first word of command) to block from execution.</p>
-                </TooltipContent>
+                <TooltipContent><p>Comma-separated list of command names to block.</p></TooltipContent>
               </Tooltip>
-              <Button
-                onClick={() =>
-                  handleSaveSetting(
-                    "blockedCommands",
-                     editableConfig.blocked_commands_str.split(",").map(s => s.trim()).filter(s => s.length > 0)
-                  )
-                }
-              >
-                Save Blocked Commands
-              </Button>
+              <Button onClick={() => handleSaveSetting("blockedCommands", editableConfig.blocked_commands_str.split(",").map(s => s.trim()).filter(s => s))}>Save Blocked Cmds</Button>
             </div>
 
-            {/* Default Shell */}
             <div className="space-y-2">
-              <Label htmlFor="default_shell_str">Default Shell</Label>
+              <Label htmlFor="default_shell_str">Default Shell (Env: DEFAULT_SHELL)</Label>
               <Tooltip>
                 <TooltipTrigger className="w-full">
-                  <Input
-                    id="default_shell_str"
-                    name="default_shell_str"
-                    value={editableConfig.default_shell_str}
-                    onChange={handleInputChange}
-                    placeholder="e.g., bash, powershell (leave empty for system default)"
-                  />
+                  <Input id="default_shell_str" name="default_shell_str" value={editableConfig.default_shell_str} onChange={handleInputChange} placeholder="e.g., bash (empty for system default)"/>
                 </TooltipTrigger>
-                <TooltipContent>
-                  <p>Shell used by `execute_command` if not specified in the call. System default if empty.</p>
-                </TooltipContent>
+                <TooltipContent><p>Shell for `execute_command`. System default if empty.</p></TooltipContent>
               </Tooltip>
-              <Button
-                onClick={() =>
-                  handleSaveSetting("defaultShell", editableConfig.default_shell_str || null) // Send null if empty
-                }
-              >
-                Save Default Shell
-              </Button>
+              <Button onClick={() => handleSaveSetting("defaultShell", editableConfig.default_shell_str || null )}>Save Default Shell</Button>
             </div>
 
-            {/* Log Level */}
             <div className="space-y-2">
-              <Label htmlFor="log_level">Log Level</Label>
-              <Select
-                name="log_level"
-                value={editableConfig.log_level}
-                onValueChange={(value) => handleSelectChange("log_level", value)}
-              >
-                <SelectTrigger id="log_level">
-                  <SelectValue placeholder="Select log level" />
-                </SelectTrigger>
+              <Label htmlFor="log_level">Log Level (Env: LOG_LEVEL)</Label>
+              <Select name="log_level" value={editableConfig.log_level} onValueChange={(value) => handleSelectChange("log_level", value)}>
+                <SelectTrigger id="log_level"><SelectValue placeholder="Select log level" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="trace">Trace</SelectItem>
                   <SelectItem value="debug">Debug</SelectItem>
@@ -334,63 +263,21 @@ export default function ConfigPage() {
                   <SelectItem value="error">Error</SelectItem>
                 </SelectContent>
               </Select>
-               <p className="text-sm text-muted-foreground">
-                Note: Changing log level here might not affect all logging immediately without an app restart, especially for `tracing-subscriber`. `tauri-plugin-log` might be more dynamic.
-              </p>
-              <Button
-                onClick={() =>
-                  handleSaveSetting("logLevel", editableConfig.log_level)
-                }
-              >
-                Save Log Level (Backend May Need Restart)
-              </Button>
+              <p className="text-sm text-muted-foreground">Backend restart may be needed for full effect.</p>
+              <Button onClick={() => handleSaveSetting("logLevel", editableConfig.log_level)}>Save Log Level</Button>
             </div>
 
-            {/* File Read Line Limit */}
             <div className="space-y-2">
-              <Label htmlFor="file_read_line_limit_str">File Read Line Limit</Label>
-              <Input
-                id="file_read_line_limit_str"
-                name="file_read_line_limit_str"
-                type="number"
-                value={editableConfig.file_read_line_limit_str}
-                onChange={handleInputChange}
-              />
-              <Button
-                onClick={() =>
-                  handleSaveSetting(
-                    "fileReadLineLimit",
-                    parseInt(editableConfig.file_read_line_limit_str, 10) || 1000,
-                  )
-                }
-              >
-                Save Read Limit
-              </Button>
+              <Label htmlFor="file_read_line_limit_str">File Read Line Limit (Env: FILE_READ_LINE_LIMIT)</Label>
+              <Input id="file_read_line_limit_str" name="file_read_line_limit_str" type="number" value={editableConfig.file_read_line_limit_str} onChange={handleInputChange}/>
+              <Button onClick={() => handleSaveSetting("fileReadLineLimit", parseInt(editableConfig.file_read_line_limit_str, 10) || 1000)}>Save Read Limit</Button>
             </div>
 
-            {/* File Write Line Limit */}
             <div className="space-y-2">
-              <Label htmlFor="file_write_line_limit_str">File Write Line Limit</Label>
-               <p className="text-sm text-muted-foreground">
-                Maximum lines `write_file` or `edit_block` will accept per call. Chunk larger writes.
-              </p>
-              <Input
-                id="file_write_line_limit_str"
-                name="file_write_line_limit_str"
-                type="number"
-                value={editableConfig.file_write_line_limit_str}
-                onChange={handleInputChange}
-              />
-              <Button
-                onClick={() =>
-                  handleSaveSetting(
-                    "fileWriteLineLimit",
-                    parseInt(editableConfig.file_write_line_limit_str, 10) || 50,
-                  )
-                }
-              >
-                Save Write Limit
-              </Button>
+              <Label htmlFor="file_write_line_limit_str">File Write Line Limit (Env: FILE_WRITE_LINE_LIMIT)</Label>
+              <p className="text-sm text-muted-foreground">Max lines for `write_file`/`edit_block` per call.</p>
+              <Input id="file_write_line_limit_str" name="file_write_line_limit_str" type="number" value={editableConfig.file_write_line_limit_str} onChange={handleInputChange}/>
+              <Button onClick={() => handleSaveSetting("fileWriteLineLimit", parseInt(editableConfig.file_write_line_limit_str, 10) || 50)}>Save Write Limit</Button>
             </div>
           </CardContent>
         </Card>

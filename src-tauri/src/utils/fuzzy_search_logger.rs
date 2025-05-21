@@ -1,3 +1,5 @@
+// FILE: src-tauri/src/utils/fuzzy_search_logger.rs
+// IMPORTANT NOTE: Rewrite the entire file.
 use crate::config::Config;
 use anyhow::Result;
 use chrono::Utc;
@@ -33,15 +35,14 @@ pub struct FuzzySearchLogEntry {
 pub struct FuzzySearchLogger {
     log_file_path: PathBuf,
     initialized: TokioMutex<bool>,
-     max_size_bytes: u64, // Added for rotation
+    max_size_bytes: u64,
 }
 
 impl FuzzySearchLogger {
     pub fn new(config_state: Arc<StdRwLock<Config>>) -> Self {
         let config_guard = config_state.read().unwrap();
         let log_file_path = config_guard.fuzzy_search_log_file.clone();
-        // Using audit log's max size for fuzzy log as well, or define a new env var
-        let max_size_bytes = config_guard.audit_log_max_size_bytes;
+        let max_size_bytes = config_guard.audit_log_max_size_bytes; // Reuse audit log size for now
         drop(config_guard);
 
         if let Some(parent_dir) = log_file_path.parent() {
@@ -70,13 +71,11 @@ impl FuzzySearchLogger {
             let backup_file_name = format!("{}_{}.{}", file_stem, timestamp, extension);
             let backup_path = self.log_file_path.with_file_name(backup_file_name);
             fs::rename(&self.log_file_path, backup_path).await?;
-            // After renaming, the original file is gone, so we need to re-initialize headers.
             let mut initialized_guard = self.initialized.lock().await;
-            *initialized_guard = false;
+            *initialized_guard = false; // Force re-initialization of headers
         }
         Ok(())
     }
-
 
     async fn ensure_log_file_initialized(&self) -> Result<()> {
         let mut initialized_guard = self.initialized.lock().await;
@@ -97,8 +96,7 @@ impl FuzzySearchLogger {
                 "fuzzyThreshold", "belowThreshold", "diff", "searchLength",
                 "foundLength", "fileExtension", "characterCodes",
                 "uniqueCharacterCount", "diffLength",
-            ]
-            .join("\t"); // Use tab as delimiter for TSV
+            ].join("\t");
             let mut file = OpenOptions::new()
                 .create(true)
                 .write(true)
@@ -117,7 +115,7 @@ impl FuzzySearchLogger {
     }
 
     async fn try_log(&self, entry: &FuzzySearchLogEntry) -> Result<()> {
-        self.rotate_log_if_needed().await?; // Check for rotation before ensuring initialization
+        self.rotate_log_if_needed().await?;
         self.ensure_log_file_initialized().await?;
 
         let escape = |s: &str| s.replace('\t', "\\t").replace('\n', "\\n").replace('\r', "\\r");
