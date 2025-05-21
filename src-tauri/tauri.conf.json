@@ -1,0 +1,70 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MCP-RG-Editor-Tauri",
+  "version": "0.1.0",
+  "identifier": "com.example.mcp-rg-editor",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:3000",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MCP-RG-Editor",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "capabilities": [
+        {
+          "identifier": "local-dev",
+          "description": "Local development server access",
+          "windows": ["*"],
+          "url": "http://localhost:3000",
+          "permissions": ["read", "write", "execute"]
+        }
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "shell": {
+      "open": true,
+      "scope": []
+    },
+    "fs": {
+      "scope": [],
+      "globalScope": []
+    },
+    "process": {
+      "scope": []
+    },
+    "http": {
+      "scope": ["https://*/*", "http://*/*"]
+    },
+    "log": {
+      "targets": [
+        {"name": "stdout", "level": "info"},
+        {"name": "logdir", "level": "debug"}
+      ],
+      "maxSize": 5242880,
+      "rotationStrategy": "KeepOne"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+Comments from default.json:
+
+// Example: Allow rg if in PATH and configured in tauri.conf.json plugin scope
+// { "name": "rg", "cmd": "rg", "args": true, "sidecar": false }
+
+// Example: Allow rg if bundled as sidecar
+// { "name": "binaries/rg" }
+
+// FS scopes will be more specific, these are placeholders
+
+// Allow specific paths based on your FILES_ROOT and ALLOWED_DIRECTORIES
+// Example: { "identifier": "fs:allow-read-recursive", "allow": [{ "path": "$HOME/projects/**" }] }
+
+// For basic process plugin use
+// For basic http plugin use
+// Allow HTTP requests
+
+// Global FS scope, also to be configured based on FILES_ROOT
+
+// Globally allowed commands
