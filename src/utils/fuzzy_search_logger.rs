@@ -1,11 +1,13 @@
+// FILE: src/utils/fuzzy_search_logger.rs
 use crate::config::Config;
 use anyhow::Result;
 use chrono::Utc;
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock as StdRwLock}; // Changed to StdRwLock for Config
-use tokio::fs::{self, OpenOptions}; // Added self
+use std::sync::{Arc, RwLock as StdRwLock}; 
+use tokio::fs::OpenOptions; // Corrected import
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex as TokioMutex; // For internal mutability
 use tracing::error;
 
 #[derive(Debug, Serialize)]
@@ -28,20 +30,21 @@ pub struct FuzzySearchLogEntry {
     pub diff_length: usize,
 }
 
-#[derive(Debug)] // Added Debug
+#[derive(Debug)] 
 pub struct FuzzySearchLogger {
     log_file_path: PathBuf,
-    initialized: bool,
+    initialized: TokioMutex<bool>, // Changed to TokioMutex<bool>
 }
 
 impl FuzzySearchLogger {
-    pub fn new(config: Arc<StdRwLock<Config>>) -> Self { // Changed to StdRwLock
-        let config_guard = config.read().unwrap(); // Read lock
+    pub fn new(config: Arc<StdRwLock<Config>>) -> Self { 
+        let config_guard = config.read().unwrap(); 
         let log_file_path = config_guard.fuzzy_search_log_file.clone();
-        drop(config_guard); // Release lock
+        drop(config_guard); 
 
         if let Some(parent_dir) = log_file_path.parent() {
             if !parent_dir.exists() {
+                // Use std::fs for synchronous operations in constructor
                 if let Err(e) = std::fs::create_dir_all(parent_dir) {
                      error!(path = %parent_dir.display(), error = %e, "Failed to create fuzzy search log directory");
                 }
@@ -49,16 +52,24 @@ impl FuzzySearchLogger {
         }
         Self {
             log_file_path,
-            initialized: false,
+            initialized: TokioMutex::new(false), // Initialize Mutex
         }
     }
 
-    async fn ensure_log_file_initialized(&mut self) -> Result<()> {
-        if self.initialized {
+    async fn ensure_log_file_initialized(&self) -> Result<()> { // Takes &self
+        let mut initialized_guard = self.initialized.lock().await; // Lock the mutex
+        if *initialized_guard {
             return Ok(());
         }
 
-        if !self.log_file_path.exists() {
+        // Check existence asynchronously
+        let exists = match tokio::fs::metadata(&self.log_file_path).await {
+            Ok(_) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => return Err(e.into()),
+        };
+
+        if !exists {
             let headers = [
                 "timestamp", "searchText", "foundText", "similarity",
                 "executionTime_ms", "exactMatchCount", "expectedReplacements",
@@ -74,19 +85,19 @@ impl FuzzySearchLogger {
                 .await?;
             file.write_all(format!("{}\n", headers).as_bytes()).await?;
         }
-        self.initialized = true;
+        *initialized_guard = true; // Mutate through guard
         Ok(())
     }
 
-    pub async fn log(&mut self, entry: &FuzzySearchLogEntry) -> Result<()> { // Made public and returning Result
+    pub async fn log(&self, entry: &FuzzySearchLogEntry) -> Result<()> { // Takes &self
         if let Err(e) = self.try_log(entry).await {
             error!(error = %e, "Failed to write fuzzy search log");
-            return Err(e); // Propagate error
+            return Err(e); 
         }
         Ok(())
     }
 
-    async fn try_log(&mut self, entry: &FuzzySearchLogEntry) -> Result<()> {
+    async fn try_log(&self, entry: &FuzzySearchLogEntry) -> Result<()> { // Takes &self
         self.ensure_log_file_initialized().await?;
 
         let escape = |s: &str| s.replace('\t', "\\t").replace('\n', "\\n").replace('\r', "\\r");
@@ -113,7 +124,7 @@ impl FuzzySearchLogger {
 
         let mut file = OpenOptions::new()
             .append(true)
-            .open(&self.log_file_path)
+            .open(&self.log_file_path) // This OpenOptions is tokio::fs::OpenOptions
             .await?;
         file.write_all(log_line.as_bytes()).await?;
         Ok(())

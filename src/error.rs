@@ -1,9 +1,11 @@
+// FILE: src/error.rs
 use thiserror::Error;
+use rust_mcp_schema::RpcErrorCode; // Added this import
 
 #[derive(Error, Debug)]
 pub enum AppError {
     #[error("I/O error: {0}")]
-    StdIoError(#[from] std::io::Error), // Renamed to avoid conflict
+    StdIoError(std::io::Error), // Removed #[from]
 
     #[error("Tokio I/O error: {0}")]
     TokioIoError(tokio::io::Error), // Removed #[from]
@@ -65,23 +67,30 @@ impl From<AppError> for rust_mcp_schema::schema_utils::CallToolError {
         let rpc_error = match err {
             AppError::InvalidInputArgument(_) | AppError::PathNotAllowed(_) | AppError::PathTraversal(_) | AppError::InvalidPath(_) =>
                 rust_mcp_schema::RpcError::new(
-                    rust_mcp_schema::RpcErrorCode::InvalidParams,
+                    RpcErrorCode::InvalidParams, // Corrected: RpcErrorCode from rust_mcp_schema
                     err.to_string(),
                     None,
                 ),
             AppError::CommandBlocked(_) =>
                 rust_mcp_schema::RpcError::new(
-                    rust_mcp_schema::RpcErrorCode::ServerError(-32001), // Custom server error for blocked
+                    RpcErrorCode::ServerError(-32001), // Corrected: RpcErrorCode from rust_mcp_schema
                     err.to_string(),
                     None,
                 ),
             _ => rust_mcp_schema::RpcError::new(
-                rust_mcp_schema::RpcErrorCode::InternalError,
+                RpcErrorCode::InternalError, // Corrected: RpcErrorCode from rust_mcp_schema
                 err.to_string(),
                 None,
             ),
         };
         rust_mcp_schema::schema_utils::CallToolError::new(rpc_error)
+    }
+}
+
+// Explicit From impl for std::io::Error
+impl From<std::io::Error> for AppError {
+    fn from(err: std::io::Error) -> Self {
+        AppError::StdIoError(err)
     }
 }
 

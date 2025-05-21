@@ -1,3 +1,4 @@
+// FILE: src/main.rs
 mod config;
 mod error;
 mod mcp;
@@ -10,14 +11,15 @@ use anyhow::Result;
 // McpServer trait is not used for `start` directly on runtime/server instances
 // use rust_mcp_sdk::McpServer; 
 use rust_mcp_schema::{InitializeResult, Implementation, ServerCapabilities, ServerCapabilitiesTools, LATEST_PROTOCOL_VERSION};
-use rust_mcp_transport::{StdioTransport, TransportOptions, McpSdkError}; // Added McpSdkError
+use rust_mcp_transport::{StdioTransport, TransportOptions};
+use rust_mcp_sdk::error::McpSdkError; // Corrected import path for McpSdkError
 use tracing::Level;
 use tracing_subscriber::{filter::EnvFilter, FmtSubscriber, fmt::format::FmtSpan};
 
 #[cfg(feature = "sse")]
-use rust_mcp_sdk::mcp_server::hyper_server::{create_server as create_sse_server, HyperServerOptions, HyperServer};
+use rust_mcp_sdk::hyper_servers::hyper_server::{create_server as create_sse_server, HyperServerOptions, HyperServer}; // Corrected import path
 #[cfg(feature = "stdio")]
-use rust_mcp_sdk::mcp_server::server_runtime::{create_server as create_stdio_server, ServerRuntime};
+use rust_mcp_sdk::mcp_runtimes::server_runtime::{create_server as create_stdio_server, ServerRuntime}; // Corrected import path
 
 
 fn setup_logging(log_level_str: &str) {
