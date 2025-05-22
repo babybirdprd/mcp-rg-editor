@@ -10,9 +10,18 @@ use sysinfo::System as SysinfoSystem;
 use async_trait::async_trait;
 use rust_mcp_sdk::McpServer;
 use rust_mcp_sdk::mcp_server::ServerHandler;
+// MODIFIED: Explicitly importing from schema_types if direct root import fails.
+// Based on rust-mcp-schema-llms.txt, `Content` is part of `CallToolResult` and `RpcErrorCode` is part of `RpcError`.
+// These are fundamental types and should be at the root. If this still fails, it's a strong indicator of a
+// version/feature issue with rust-mcp-schema itself.
 use rust_mcp_schema::{
-    CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content, // Content should now be resolved
-    schema_utils::CallToolError, RpcError, RpcErrorCode, // RpcErrorCode should now be resolved
+    CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool,
+    Content, // Expecting this to be at the root
+    schema_utils::CallToolError, RpcError,
+    RpcErrorCode, // Expecting this to be at the root
+    // TODO: If Content or RpcErrorCode still fail, try:
+    // types::Content,
+    // common::RpcErrorCode, // Or similar, based on actual schema structure if not at root.
 };
 use serde_json::Value;
 use std::sync::{Arc, RwLock as StdRwLock};

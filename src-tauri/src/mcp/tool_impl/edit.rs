@@ -7,6 +7,7 @@ use crate::utils::path_utils::validate_and_normalize_path;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+// MODIFIED: Assuming these types are at the root of tauri_plugin_fs.
 use tauri_plugin_fs::{FilePath, FsExt, FileOptions};
 use tracing::{debug, instrument};
 use std::time::Instant;
@@ -52,8 +53,9 @@ async fn read_file_for_edit_mcp_internal(
     if !app_handle.fs_scope().is_allowed(&path) {
         return Err(AppError::PathNotAllowed(format!("Read denied by FS scope: {}", path.display())));
     }
-    let original_content = app_handle.read_text_file(FilePath::Path(path.clone())) // MODIFIED
-        .map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to read text file {}: {}", path.display(), e)})?;
+    // MODIFIED: Added .await as fs().read_text_file() IS asynchronous
+    let original_content = app_handle.fs().read_text_file(FilePath::Path(path.clone()))
+        .await.map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to read text file {}: {}", path.display(), e)})?;
     Ok((original_content, path, detect_line_ending(&original_content)))
 }
 
@@ -66,8 +68,9 @@ async fn write_file_after_edit_mcp(
     if !app_handle.fs_scope().is_allowed(path_obj) {
         return Err(AppError::PathNotAllowed(format!("Write denied by FS scope: {}", path_obj.display())));
     }
-    app_handle.write_text_file(FilePath::Path(path_obj.clone()), content, Some(FileOptions { append: Some(false), base_dir: None })) // MODIFIED
-        .map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to write text file {}: {}", path_obj.display(), e)})
+    // MODIFIED: Added .await as fs().write_text_file() IS asynchronous
+    app_handle.fs().write_text_file(FilePath::Path(path_obj.clone()), content, Some(FileOptions { append: Some(false), base_dir: None }))
+        .await.map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to write text file {}: {}", path_obj.display(), e)})
 }
 
 

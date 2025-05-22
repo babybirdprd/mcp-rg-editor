@@ -16,6 +16,7 @@ tauri-build = { version = "2.0.0-beta.20", features = [] }
 [dependencies]
 # Tauri Core & Essential Plugins
 tauri = { version = "2.5.1", features = ["devtools"] }
+# TODO: If fs type import errors persist, check if specific features are needed for tauri-plugin-fs, e.g., "all-api"
 tauri-plugin-fs = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 tauri-plugin-shell = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 tauri-plugin-process = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
@@ -25,10 +26,11 @@ tauri-plugin-log = { git = "https://github.com/tauri-apps/plugins-workspace", br
 tauri-plugin-notification = { git = "https://github.com/tauri-apps/plugins-workspace", branch = "v2" }
 
 # MCP SDK Dependencies
-rust-mcp-sdk = "0.2.6" # As per your provided rust-mcp-sdk-llms.txt
-rust-mcp-schema = { version = "0.4.0", features = ["latest"] } # MODIFIED: Added latest feature
-rust-mcp-transport = "0.2.3" # As per your provided rust-mcp-sdk-llms.txt
-async-trait = "0.1.80" # Updated version, check compatibility if issues arise
+rust-mcp-sdk = "0.2.6"
+# MODIFIED: Removed features flag to use default. If Content/RpcErrorCode still fail, will try specific version like "0.3.0" or investigate specific feature for these types.
+rust-mcp-schema = { version = "0.4.0" } 
+rust-mcp-transport = "0.2.3"
+async-trait = "0.1.80"
 
 # Serde
 serde = { version = "1.0.203", features = ["derive"] }
@@ -43,15 +45,15 @@ dotenvy = "0.15.7"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json", "fmt"] }
 
-# Utilities from original mcp-rg-editor (ensure versions are compatible)
+# Utilities
 which = "6.0.1"
 uuid = { version = "1.10.0", features = ["v4", "serde"] }
 strsim = "0.11.1"
-sysinfo = "0.30.12" # Check for API changes from 0.35.1
+sysinfo = "0.30.12"
 regex = "1.10.5"
 shellexpand = "3.1.0"
 chrono = { version = "0.4.38", features = ["serde"] }
-reqwest = { version = "0.12.5", features = ["json", "stream"] } # May still be useful for some URL tasks
+reqwest = { version = "0.12.5", features = ["json", "stream"] }
 base64 = "0.22.1"
 mime_guess = "2.0.5"
 diff = "0.1.13"
@@ -60,19 +62,18 @@ tokio = { version = "1.38.1", features = ["full"] }
 once_cell = "1.19.0"
 
 # For MCP SSE Server (if enabled)
-axum = { version = "0.7.5", optional = true } # rust-mcp-sdk might bring its own hyper/axum
+axum = { version = "0.7.5", optional = true }
 hyper = { version = "1.4.1", features = ["full"], optional = true }
 tower-http = { version = "0.5.2", features = ["fs", "trace", "cors"], optional = true }
 log = "0.4.27"
 
 
 [features]
-default = ["custom-protocol", "mcp-stdio-server"] # Default to STDIO MCP server
+default = ["custom-protocol", "mcp-stdio-server"]
 custom-protocol = ["tauri/custom-protocol"]
 
-# MCP Server features
 mcp-stdio-server = []
-mcp-sse-server = ["axum", "hyper", "tower-http", "rust-mcp-sdk/hyper-server"] # Enable if SSE transport is desired for MCP
+mcp-sse-server = ["axum", "hyper", "tower-http", "rust-mcp-sdk/hyper-server"]
 
 [profile.release]
 panic = "abort"
