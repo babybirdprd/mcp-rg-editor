@@ -7,8 +7,8 @@ use crate::utils::path_utils::validate_and_normalize_path;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri_plugin_fs::{FilePath, FsExt, FileOptions}; // Added FileOptions
-use tracing::{debug, instrument}; 
+use tauri_plugin_fs::{FilePath, FsExt, FileOptions};
+use tracing::{debug, instrument};
 use std::time::Instant;
 use chrono::Utc;
 use diff;
@@ -46,14 +46,13 @@ const FUZZY_SIMILARITY_THRESHOLD_MCP: f64 = 0.7;
 async fn read_file_for_edit_mcp_internal(
     app_handle: &tauri::AppHandle,
     file_path_str: &str,
-    config: &Config 
+    config: &Config
 ) -> Result<(String, PathBuf, LineEndingStyle), AppError> {
     let path = validate_and_normalize_path(file_path_str, config, true, false)?;
     if !app_handle.fs_scope().is_allowed(&path) {
         return Err(AppError::PathNotAllowed(format!("Read denied by FS scope: {}", path.display())));
     }
-    // MODIFIED: Removed .await and Option for read_text_file
-    let original_content = app_handle.fs().read_text_file(FilePath::Path(path.clone())) 
+    let original_content = app_handle.read_text_file(FilePath::Path(path.clone())) // MODIFIED
         .map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to read text file {}: {}", path.display(), e)})?;
     Ok((original_content, path, detect_line_ending(&original_content)))
 }
@@ -67,8 +66,7 @@ async fn write_file_after_edit_mcp(
     if !app_handle.fs_scope().is_allowed(path_obj) {
         return Err(AppError::PathNotAllowed(format!("Write denied by FS scope: {}", path_obj.display())));
     }
-    // MODIFIED: Removed .await and Option for write_text_file
-    app_handle.fs().write_text_file(FilePath::Path(path_obj.clone()), content, Some(FileOptions { append: Some(false), base_dir: None })) 
+    app_handle.write_text_file(FilePath::Path(path_obj.clone()), content, Some(FileOptions { append: Some(false), base_dir: None })) // MODIFIED
         .map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to write text file {}: {}", path_obj.display(), e)})
 }
 
@@ -80,12 +78,12 @@ pub async fn mcp_edit_block(
 ) -> Result<EditBlockResultMCP, AppError> {
     if params.old_string.is_empty() { return Err(AppError::EditError("old_string cannot be empty.".into())); }
 
-    let (original_content, validated_path, file_line_ending, fuzzy_log_path, _files_root_for_log) = { 
+    let (original_content, validated_path, file_line_ending, fuzzy_log_path, _files_root_for_log) = {
         let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
         let (content, path, ending) = read_file_for_edit_mcp_internal(&deps.app_handle, &params.file_path, &*config_guard).await?;
         (content, path, ending, config_guard.fuzzy_search_log_file.clone(), config_guard.files_root.clone())
     };
-    
+
     let file_ext = validated_path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
 
     let norm_old = normalize_line_endings(&params.old_string, file_line_ending);
@@ -135,7 +133,7 @@ pub async fn mcp_edit_block(
         similarity_percent: similarity * 100.0, execution_time_ms: fuzzy_time_ms,
         diff_highlight: diff_hl.clone(), log_path_suggestion: fuzzy_log_path.display().to_string()
     };
-    
+
     if similarity >= FUZZY_SIMILARITY_THRESHOLD_MCP {
         Ok(EditBlockResultMCP {
             file_path: params.file_path, replacements_made: 0,
@@ -180,15 +178,15 @@ fn get_character_code_data_internal(expected: &str, actual: &str) -> CharCodeDat
     let mut expected_chars_iter_prefix = expected.chars();
     let mut actual_chars_iter_prefix = actual.chars();
     for _ in 0..min_char_len { if expected_chars_iter_prefix.next() == actual_chars_iter_prefix.next() { prefix_len +=1; } else { break; }}
-    
+
     let mut expected_chars_rev_iter = expected.chars().rev();
     let mut actual_chars_rev_iter = actual.chars().rev();
     let mut suffix_len = 0;
     for _ in 0..(min_char_len - prefix_len) { if expected_chars_rev_iter.next() == actual_chars_rev_iter.next() { suffix_len +=1; } else { break; }}
-    
+
     let expected_diff_str: String = expected.chars().skip(prefix_len).take(expected.chars().count().saturating_sub(prefix_len).saturating_sub(suffix_len)).collect();
     let actual_diff_str: String = actual.chars().skip(prefix_len).take(actual.chars().count().saturating_sub(prefix_len).saturating_sub(suffix_len)).collect();
-    
+
     let mut char_codes: HashMap<u32, usize> = HashMap::new();
     let full_diff_str = format!("{}{}", expected_diff_str, actual_diff_str);
     for ch in full_diff_str.chars() { *char_codes.entry(ch as u32).or_insert(0) += 1; }
