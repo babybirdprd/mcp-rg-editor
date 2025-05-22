@@ -12,7 +12,7 @@ use crate::mcp::McpServerLaunchParams;
 use std::sync::Arc;
 use tauri::Manager;
 use tracing::Level;
-use tracing_subscriber::{filter::EnvFilter, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, Layer as TracingLayerExt}; // Renamed Layer to avoid conflict
+use tracing_subscriber::{filter::EnvFilter, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt}; // Removed Layer as TracingLayerExt
 
 use rust_mcp_sdk::McpServer;
 use rust_mcp_sdk::mcp_server::{server_runtime, ServerRuntime as McpServerRuntime};
@@ -20,7 +20,7 @@ use rust_mcp_sdk::error::McpSdkError;
 use rust_mcp_schema::{InitializeResult as McpInitializeResult, Implementation as McpImplementation, ServerCapabilities as McpServerCapabilities, ServerCapabilitiesTools as McpServerCapabilitiesTools, LATEST_PROTOCOL_VERSION as MCP_LATEST_PROTOCOL_VERSION};
 use rust_mcp_transport::{StdioTransport as McpStdioTransport, TransportOptions as McpTransportOptions};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
-use tauri_plugin_log::TauriLogger; // Assuming this is the correct type for the layer
+use tauri_plugin_log::TauriLogger;
 
 #[cfg(feature = "mcp-sse-server")]
 use rust_mcp_sdk::hyper_server::{create_server as create_mcp_sse_server, HyperServerOptions as McpHyperServerOptions, HyperServerRuntime as McpHyperServerRuntime};
@@ -37,7 +37,7 @@ fn setup_tracing_and_logging(log_level_str: &str, app_handle: &tauri::AppHandle)
     };
 
     let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("mcp_rg_editor_tauri_lib={}", level)));
+        .unwrap_or_else(|_| EnvFilter::new(format!("mcp_rg_editor_tauri_lib={},hyper=warn,rustls=warn", level))); // Added hyper and rustls filtering
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
@@ -46,33 +46,39 @@ fn setup_tracing_and_logging(log_level_str: &str, app_handle: &tauri::AppHandle)
         .with_level(true)
         .with_span_events(FmtSpan::CLOSE);
 
+    // Configure tauri_plugin_log targets without EnvFilter directly on them
     let tauri_log_targets = [
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
             file_name: Some("app_backend.log".into()),
-        })
-        .filter(EnvFilter::new(format!("mcp_rg_editor_tauri_lib={}", level))), // Corrected method name
-        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview)
-            .filter(EnvFilter::new(format!("mcp_rg_editor_tauri_lib={}", Level::INFO))), // Corrected method name
+        }),
+        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
     ];
     
-    // Construct the tauri_plugin_log::TauriLogger which implements tracing_subscriber::Layer
-    // The builder itself is used to configure the plugin, which is added later.
-    // For integrating with tracing_subscriber, we need a Layer.
-    // tauri_plugin_log::TauriLogger is the layer provided by the plugin.
-    let tauri_log_layer = TauriLogger::new(
-        tauri_plugin_log::Builder::default()
+    let tauri_log_plugin_config = tauri_plugin_log::Builder::default()
             .targets(tauri_log_targets)
-            .level_for("hyper", tracing::Level::WARN) // Corrected to tracing::Level
-            .level_for("rustls", tracing::Level::WARN) // Corrected to tracing::Level
-            .build() // This build() is for the config part of TauriLogger
-    );
+            .level_for("hyper", log::LevelFilter::Warn) // Corrected to log::LevelFilter
+            .level_for("rustls", log::LevelFilter::Warn) // Corrected to log::LevelFilter
+            .level(match level { // Set global level for tauri-plugin-log based on tracing level
+                Level::TRACE => log::LevelFilter::Trace,
+                Level::DEBUG => log::LevelFilter::Debug,
+                Level::INFO => log::LevelFilter::Info,
+                Level::WARN => log::LevelFilter::Warn,
+                Level::ERROR => log::LevelFilter::Error,
+            })
+            .build();
+    
+    let tauri_log_layer = TauriLogger::new(tauri_log_plugin_config.clone()); // Clone config for layer
 
 
     tracing_subscriber::registry()
         .with(fmt_layer)
-        .with(tauri_log_layer) // Add the TauriLogger layer
+        .with(tauri_log_layer) 
         .with(env_filter)
         .init();
+    
+    // The plugin itself needs to be added to the Tauri builder
+    // We pass the already built config to it.
+    app_handle.plugin(tauri_plugin_log::Builder::new().config(tauri_log_plugin_config).build()).expect("Failed to initialize tauri-plugin-log");
     
     tracing::info!("Tracing subscriber and tauri-plugin-log initialized. Global log level: {}", level);
 }
@@ -111,7 +117,10 @@ pub fn run() {
             let config_state_arc = init_config_state(&app_handle);
 
             let log_level_for_setup = config_state_arc.read().unwrap().log_level.clone();
+            // Call setup_tracing_and_logging *before* adding the plugin via app_handle.plugin
+            // as it now internally adds the plugin.
             setup_tracing_and_logging(&log_level_for_setup, &app_handle);
+
 
             app.manage(config_state_arc.clone());
 
@@ -230,10 +239,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        // tauri_plugin_log is initialized via setup_tracing_and_logging, not added as a plugin here
-        // as it's integrated into the tracing subscriber.
-        // If direct plugin usage is needed, add: .plugin(tauri_plugin_log::Builder::default().build())
-        // but ensure it doesn't conflict with the tracing layer.
+        // tauri_plugin_log is now initialized and added via setup_tracing_and_logging
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::config_commands::get_config_command,

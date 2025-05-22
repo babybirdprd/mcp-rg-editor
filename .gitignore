@@ -41,3 +41,4 @@ yarn-error.log*
 
 src-tauri/Cargo.lock
 diagnostics.json
+repomix-output-tauri-nextjs.xml

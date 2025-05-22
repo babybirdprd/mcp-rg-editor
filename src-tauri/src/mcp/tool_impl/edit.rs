@@ -7,10 +7,8 @@ use crate::utils::path_utils::validate_and_normalize_path;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-// use std::sync::RwLockReadGuard; // No longer needed directly in this file's functions
-// use tauri::AppHandle; // No longer needed directly
-use tauri_plugin_fs::FsExt; // Added FsExt
-use tracing::{debug, instrument, warn}; // Corrected warn import
+use tauri_plugin_fs::{FilePath, FsExt, FileOptions}; // Added FileOptions
+use tracing::{debug, instrument}; // Removed unused warn
 use std::time::Instant;
 use chrono::Utc;
 use diff;
@@ -48,15 +46,13 @@ const FUZZY_SIMILARITY_THRESHOLD_MCP: f64 = 0.7;
 async fn read_file_for_edit_mcp_internal(
     app_handle: &tauri::AppHandle,
     file_path_str: &str,
-    config: &Config // Pass &Config
+    config: &Config 
 ) -> Result<(String, PathBuf, LineEndingStyle), AppError> {
-    // validate_and_normalize_path now takes &Config
     let path = validate_and_normalize_path(file_path_str, config, true, false)?;
     if !app_handle.fs_scope().is_allowed(&path) {
         return Err(AppError::PathNotAllowed(format!("Read denied by FS scope: {}", path.display())));
     }
-    // Use app_handle.fs() for filesystem operations
-    let original_content = app_handle.fs().read_text_file(&path).await
+    let original_content = app_handle.fs().read_text_file(FilePath::Path(path.clone()), None).await // Corrected path usage
         .map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to read text file {}: {}", path.display(), e)})?;
     Ok((original_content, path, detect_line_ending(&original_content)))
 }
@@ -70,8 +66,7 @@ async fn write_file_after_edit_mcp(
     if !app_handle.fs_scope().is_allowed(path_obj) {
         return Err(AppError::PathNotAllowed(format!("Write denied by FS scope: {}", path_obj.display())));
     }
-    // Use app_handle.fs() for filesystem operations
-    app_handle.fs().write_text_file(path_obj, content).await
+    app_handle.fs().write_text_file(FilePath::Path(path_obj.clone()), content, None).await // Corrected path usage
         .map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to write text file {}: {}", path_obj.display(), e)})
 }
 
@@ -83,9 +78,8 @@ pub async fn mcp_edit_block(
 ) -> Result<EditBlockResultMCP, AppError> {
     if params.old_string.is_empty() { return Err(AppError::EditError("old_string cannot be empty.".into())); }
 
-    let (original_content, validated_path, file_line_ending, fuzzy_log_path, _files_root_for_log) = { // _files_root_for_log marked unused
+    let (original_content, validated_path, file_line_ending, fuzzy_log_path, _files_root_for_log) = { 
         let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-        // Pass &*config_guard to get &Config
         let (content, path, ending) = read_file_for_edit_mcp_internal(&deps.app_handle, &params.file_path, &*config_guard).await?;
         (content, path, ending, config_guard.fuzzy_search_log_file.clone(), config_guard.files_root.clone())
     };

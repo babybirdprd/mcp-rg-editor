@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use rust_mcp_sdk::McpServer;
 use rust_mcp_sdk::mcp_server::ServerHandler;
 use rust_mcp_schema::{
-    CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content, // Content is a valid top-level import
-    schema_utils::CallToolError, RpcError, RpcErrorCode, // RpcErrorCode is also a valid top-level import
+    CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content,
+    schema_utils::CallToolError, RpcError, RpcErrorCode,
 };
 use serde_json::Value;
 use std::sync::{Arc, RwLock as StdRwLock};
@@ -78,7 +78,7 @@ fn create_mcp_json_call_tool_result(value: Value) -> Result<CallToolResult, Call
         updated_at: None,
         meta: None,
     };
-    Ok(CallToolResult { content: vec![content_item], meta: None, is_error: Some(false) }) // Added is_error
+    Ok(CallToolResult { content: vec![content_item], meta: None, is_error: Some(false) })
 }
 
 
@@ -92,23 +92,23 @@ impl ServerHandler for EnhancedServerHandler {
     ) -> Result<ListToolsResult, RpcError> {
         info!("MCP: Handling list_tools request");
         let tools = vec![
-            Tool { name: "mcp_get_config".to_string(), description: Some("Get the MCP server's current runtime configuration.".to_string()), input_schema: get_mcp_config_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "read_file".to_string(), description: Some("Read content of a local file or URL.".to_string()), input_schema: read_file_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "write_file".to_string(), description: Some("Write/append content to a file.".to_string()), input_schema: write_file_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "create_directory".to_string(), description: Some("Create directories, including nested ones.".to_string()), input_schema: create_directory_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "list_directory".to_string(), description: Some("List directory contents.".to_string()), input_schema: list_directory_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "move_file".to_string(), description: Some("Move or rename files or directories.".to_string()), input_schema: move_file_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "get_file_info".to_string(), description: Some("Get metadata for a file or directory.".to_string()), input_schema: get_file_info_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "read_multiple_files".to_string(), description: Some("Read multiple local files.".to_string()), input_schema: read_multiple_files_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "search_files".to_string(), description: Some("Find files/dirs by name.".to_string()), input_schema: search_files_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "search_code".to_string(), description: Some("Search code with Ripgrep.".to_string()), input_schema: search_code_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "execute_command".to_string(), description: Some("Run terminal commands. Output is streamed via events if using Tauri UI; for MCP, initial output/status returned.".to_string()), input_schema: execute_command_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "force_terminate_session".to_string(), description: Some("Stop a running command session by its ID.".to_string()), input_schema: force_terminate_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "list_sessions".to_string(), description: Some("List active command sessions.".to_string()), input_schema: list_sessions_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "read_session_output_status".to_string(), description: Some("Get status of a command session. For MCP, this might include buffered output if designed so.".to_string()), input_schema: read_session_output_status_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "list_processes".to_string(), description: Some("List system processes.".to_string()), input_schema: list_processes_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "kill_process".to_string(), description: Some("Terminate a system process by PID.".to_string()), input_schema: kill_process_mcp_schema(), output_schema: None, resources_request: None, meta: None },
-            Tool { name: "edit_block".to_string(), description: Some("Apply targeted text replacements in a file.".to_string()), input_schema: edit_block_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "mcp_get_config".to_string(), description: Some("Get the MCP server's current runtime configuration.".to_string()), input_schema: get_mcp_config_schema()},
+            Tool { name: "read_file".to_string(), description: Some("Read content of a local file or URL.".to_string()), input_schema: read_file_mcp_schema()},
+            Tool { name: "write_file".to_string(), description: Some("Write/append content to a file.".to_string()), input_schema: write_file_mcp_schema()},
+            Tool { name: "create_directory".to_string(), description: Some("Create directories, including nested ones.".to_string()), input_schema: create_directory_mcp_schema()},
+            Tool { name: "list_directory".to_string(), description: Some("List directory contents.".to_string()), input_schema: list_directory_mcp_schema()},
+            Tool { name: "move_file".to_string(), description: Some("Move or rename files or directories.".to_string()), input_schema: move_file_mcp_schema()},
+            Tool { name: "get_file_info".to_string(), description: Some("Get metadata for a file or directory.".to_string()), input_schema: get_file_info_mcp_schema()},
+            Tool { name: "read_multiple_files".to_string(), description: Some("Read multiple local files.".to_string()), input_schema: read_multiple_files_mcp_schema()},
+            Tool { name: "search_files".to_string(), description: Some("Find files/dirs by name.".to_string()), input_schema: search_files_mcp_schema()},
+            Tool { name: "search_code".to_string(), description: Some("Search code with Ripgrep.".to_string()), input_schema: search_code_mcp_schema()},
+            Tool { name: "execute_command".to_string(), description: Some("Run terminal commands. Output is streamed via events if using Tauri UI; for MCP, initial output/status returned.".to_string()), input_schema: execute_command_mcp_schema()},
+            Tool { name: "force_terminate_session".to_string(), description: Some("Stop a running command session by its ID.".to_string()), input_schema: force_terminate_mcp_schema()},
+            Tool { name: "list_sessions".to_string(), description: Some("List active command sessions.".to_string()), input_schema: list_sessions_mcp_schema()},
+            Tool { name: "read_session_output_status".to_string(), description: Some("Get status of a command session. For MCP, this might include buffered output if designed so.".to_string()), input_schema: read_session_output_status_mcp_schema()},
+            Tool { name: "list_processes".to_string(), description: Some("List system processes.".to_string()), input_schema: list_processes_mcp_schema()},
+            Tool { name: "kill_process".to_string(), description: Some("Terminate a system process by PID.".to_string()), input_schema: kill_process_mcp_schema()},
+            Tool { name: "edit_block".to_string(), description: Some("Apply targeted text replacements in a file.".to_string()), input_schema: edit_block_mcp_schema()},
         ];
         Ok(ListToolsResult { tools, meta: None, next_cursor: None })
     }

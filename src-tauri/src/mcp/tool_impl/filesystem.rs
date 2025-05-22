@@ -7,8 +7,7 @@ use crate::utils::line_ending_handler::{detect_line_ending, normalize_line_endin
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::RwLockReadGuard;
-use tauri::AppHandle; // Removed Manager
-use tauri_plugin_fs::{DirEntry, FilePath, FsExt, ReadTextFileOptions as FsReadTextFileOptions, WriteTextFileOptions as FsWriteTextFileOptions, DirOptions as FsDirOptions}; // Renamed to avoid conflict
+use tauri_plugin_fs::{DirEntry, FilePath, FsExt, PathOptions, DirOperationOptions, FileOptions, Metadata as FsMetadata}; // Corrected imports
 use tracing::{debug, warn, instrument};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use tokio::time::{timeout, Duration};
@@ -39,7 +38,7 @@ pub struct WriteFileParamsMCP {
 }
 fn default_rewrite_mode_mcp() -> WriteModeMCP { WriteModeMCP::Rewrite }
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy, Serialize)] // Added Eq
+#[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy, Serialize)] 
 #[serde(rename_all = "lowercase")]
 pub enum WriteModeMCP { Rewrite, Append }
 
@@ -90,7 +89,7 @@ pub struct ReadMultipleFilesResultMCP { pub results: Vec<FileContentMCP> }
 #[derive(Debug, Serialize)]
 pub struct FileOperationResultMCP { pub success: bool, pub path: String, pub message: String }
 #[derive(Debug, Serialize)]
-pub struct ListDirectoryResultMCP { pub path: String, pub entries: Vec<DirEntry> } // Changed to DirEntry
+pub struct ListDirectoryResultMCP { pub path: String, pub entries: Vec<DirEntry> } 
 
 #[derive(Debug, Serialize)]
 pub struct FileInfoResultMCP {
@@ -150,15 +149,17 @@ pub async fn mcp_read_file(deps: &ToolDependencies, params: ReadFileParamsMCP) -
         let client = reqwest::Client::new();
         return read_file_from_url_mcp_internal(&client, &params.path, &deps.app_handle).await;
     }
-    let path = validate_and_normalize_path(&params.path, &config_guard, true, false)?; // Pass borrowed string
+    let path = validate_and_normalize_path(&params.path, &config_guard, true, false)?; 
     if !deps.app_handle.fs_scope().is_allowed(&path) { return Err(AppError::PathNotAllowed(format!("FS scope disallows read: {}", path.display()))); }
     
     let mime_type = mime_guess::from_path(&path).first_or_octet_stream().to_string();
     if is_image_mime_mcp(&mime_type) {
-        let bytes = deps.app_handle.read_binary_file(FilePath::Path(path)).await.map_err(|e| AppError::PluginError{ plugin:"fs".to_string(), message:e.to_string()})?;
+        let bytes = deps.app_handle.fs().read(FilePath::Path(path), None).await
+            .map_err(|e| AppError::PluginError{ plugin:"fs".to_string(), message:e.to_string()})?;
         Ok(FileContentMCP { path: params.path, text_content: None, image_data_base64: Some(BASE64_STANDARD.encode(&bytes)), mime_type, lines_read: None, total_lines: None, truncated: None, error: None })
     } else {
-        let full_content = deps.app_handle.read_text_file(FilePath::Path(path), None::<FsReadTextFileOptions>).await.map_err(|e| AppError::PluginError{ plugin:"fs".to_string(), message:e.to_string()})?;
+        let full_content = deps.app_handle.fs().read_text_file(FilePath::Path(path), None).await
+            .map_err(|e| AppError::PluginError{ plugin:"fs".to_string(), message:e.to_string()})?;
         let mut lines_iter = full_content.lines();
         let mut content_vec = Vec::new();
         let mut current_line_idx = 0;
@@ -181,25 +182,24 @@ pub async fn mcp_read_file(deps: &ToolDependencies, params: ReadFileParamsMCP) -
 #[instrument(skip(deps, params), fields(path = %params.path, mode = ?params.mode))]
 pub async fn mcp_write_file(deps: &ToolDependencies, params: WriteFileParamsMCP) -> Result<FileOperationResultMCP, AppError> {
     let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-    let path = validate_and_normalize_path(&params.path, &config_guard, false, true)?; // Pass borrowed string
+    let path = validate_and_normalize_path(&params.path, &config_guard, false, true)?; 
     let lines: Vec<&str> = params.content.lines().collect();
     if lines.len() > config_guard.file_write_line_limit { return Err(AppError::EditError(format!("Content exceeds line limit {}. Received {}.", config_guard.file_write_line_limit, lines.len()))); }
     
-    let final_content_str = if params.mode == WriteModeMCP::Append && deps.app_handle.exists(FilePath::Path(path.clone()), None).await.unwrap_or(false) {
-        let existing_content_str = deps.app_handle.read_text_file(FilePath::Path(path.clone()), None::<FsReadTextFileOptions>).await.unwrap_or_default();
-        normalize_line_endings(&params.content, detect_line_ending(&existing_content_str)) // Pass borrowed string
-    } else { normalize_line_endings(&params.content, if cfg!(windows) {LineEndingStyle::CrLf} else {LineEndingStyle::Lf}) }; // Pass borrowed string
+    let final_content_str = if params.mode == WriteModeMCP::Append && deps.app_handle.fs().exists(FilePath::Path(path.clone()), None).await.unwrap_or(false) {
+        let existing_content_str = deps.app_handle.fs().read_text_file(FilePath::Path(path.clone()), None).await.unwrap_or_default();
+        normalize_line_endings(&params.content, detect_line_ending(&existing_content_str)) 
+    } else { normalize_line_endings(&params.content, if cfg!(windows) {LineEndingStyle::CrLf} else {LineEndingStyle::Lf}) }; 
     
     if !deps.app_handle.fs_scope().is_allowed(&path) { return Err(AppError::PathNotAllowed(format!("FS scope disallows write: {}", path.display()))); }
     
-    let options = FsWriteTextFileOptions {
-        path: FilePath::Path(path.clone()),
-        contents: final_content_str,
+    let fs_options = FileOptions {
         append: Some(params.mode == WriteModeMCP::Append),
-        base_dir: None,
+        base_dir: None, // Assuming path is absolute or resolved relative to CWD by validate_and_normalize_path
     };
 
-    deps.app_handle.write_text_file(options).await.map_err(|e|AppError::PluginError{plugin:"fs".to_string(), message:e.to_string()})?;
+    deps.app_handle.fs().write_text_file(FilePath::Path(path.clone()), final_content_str, Some(fs_options)).await
+        .map_err(|e|AppError::PluginError{plugin:"fs".to_string(), message:e.to_string()})?;
     
     Ok(FileOperationResultMCP { success: true, path: params.path, message: format!("Successfully {} content.", if params.mode == WriteModeMCP::Append {"appended"} else {"wrote"})})
 }
@@ -207,39 +207,44 @@ pub async fn mcp_write_file(deps: &ToolDependencies, params: WriteFileParamsMCP)
 #[instrument(skip(deps, params), fields(path = %params.path))]
 pub async fn mcp_create_directory(deps: &ToolDependencies, params: CreateDirectoryParamsMCP) -> Result<FileOperationResultMCP, AppError> {
     let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-    let path = validate_and_normalize_path(&params.path, &config_guard, false, true)?; // Pass borrowed string
+    let path = validate_and_normalize_path(&params.path, &config_guard, false, true)?; 
     if !deps.app_handle.fs_scope().is_allowed(&path) { return Err(AppError::PathNotAllowed(format!("FS scope disallows dir creation: {}", path.display()))); }
-    deps.app_handle.create_dir(FilePath::Path(path), Some(FsDirOptions { recursive: true })).await.map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
+    deps.app_handle.fs().create_dir(FilePath::Path(path), Some(DirOperationOptions { recursive: Some(true), base_dir: None })).await
+        .map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
     Ok(FileOperationResultMCP { success: true, path: params.path, message: "Directory created.".to_string() })
 }
 
 #[instrument(skip(deps, params), fields(path = %params.path))]
 pub async fn mcp_list_directory(deps: &ToolDependencies, params: ListDirectoryParamsMCP) -> Result<ListDirectoryResultMCP, AppError> {
     let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-    let path = validate_and_normalize_path(&params.path, &config_guard, true, false)?; // Pass borrowed string
+    let path = validate_and_normalize_path(&params.path, &config_guard, true, false)?; 
     if !deps.app_handle.fs_scope().is_allowed(&path) { return Err(AppError::PathNotAllowed(format!("FS scope disallows list: {}", path.display()))); }
-    let entries_data = deps.app_handle.read_dir(FilePath::Path(path), Some(FsDirOptions { recursive: false })).await.map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
+    let entries_data = deps.app_handle.fs().read_dir(FilePath::Path(path), Some(DirOperationOptions { recursive: Some(false), base_dir: None })).await
+        .map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
     Ok(ListDirectoryResultMCP { path: params.path, entries: entries_data })
 }
 
 #[instrument(skip(deps, params), fields(source = %params.source, dest = %params.destination))]
 pub async fn mcp_move_file(deps: &ToolDependencies, params: MoveFileParamsMCP) -> Result<FileOperationResultMCP, AppError> {
     let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-    let source_path = validate_and_normalize_path(&params.source, &config_guard, true, false)?; // Pass borrowed string
-    let dest_path = validate_and_normalize_path(&params.destination, &config_guard, false, true)?; // Pass borrowed string
+    let source_path = validate_and_normalize_path(&params.source, &config_guard, true, false)?; 
+    let dest_path = validate_and_normalize_path(&params.destination, &config_guard, false, true)?; 
     if !deps.app_handle.fs_scope().is_allowed(&source_path) || !deps.app_handle.fs_scope().is_allowed(&dest_path.parent().unwrap_or(&dest_path)) {
         return Err(AppError::PathNotAllowed(format!("FS scope disallows move from {} or to {}", source_path.display(), dest_path.parent().unwrap_or(&dest_path).display())));
     }
-    deps.app_handle.rename_file(FilePath::Path(source_path), FilePath::Path(dest_path)).await.map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
+    deps.app_handle.fs().rename(FilePath::Path(source_path), FilePath::Path(dest_path), None).await
+        .map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
     Ok(FileOperationResultMCP { success: true, path: params.destination, message: format!("Moved {} to {}.", params.source, params.destination) })
 }
 
 #[instrument(skip(deps, params), fields(path = %params.path))]
 pub async fn mcp_get_file_info(deps: &ToolDependencies, params: GetFileInfoParamsMCP) -> Result<FileInfoResultMCP, AppError> {
     let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-    let path = validate_and_normalize_path(&params.path, &config_guard, true, false)?; // Pass borrowed string
+    let path = validate_and_normalize_path(&params.path, &config_guard, true, false)?; 
     if !deps.app_handle.fs_scope().is_allowed(&path) { return Err(AppError::PathNotAllowed(format!("FS scope disallows info: {}", path.display()))); }
-    let metadata = deps.app_handle.metadata(FilePath::Path(path.clone())).await.map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
+    
+    let fs_metadata: FsMetadata = deps.app_handle.fs().metadata(FilePath::Path(path.clone())).await
+        .map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
     
     let to_iso = |st_opt_ms: Option<u128>| st_opt_ms.map(|st_ms| {
         let secs = (st_ms / 1000) as i64;
@@ -249,7 +254,7 @@ pub async fn mcp_get_file_info(deps: &ToolDependencies, params: GetFileInfoParam
             .unwrap_or_default()
     });
     
-    let std_meta = std::fs::metadata(&path)?; 
+    let std_meta = std::fs::metadata(&path).map_err(|e| AppError::StdIoError(e.to_string()))?; 
     let perms = {
         #[cfg(unix)] {
             use std::os::unix::fs::PermissionsExt;
@@ -259,12 +264,12 @@ pub async fn mcp_get_file_info(deps: &ToolDependencies, params: GetFileInfoParam
     };
     Ok(FileInfoResultMCP { 
         path: params.path, 
-        size: metadata.len(), 
-        is_dir: metadata.is_dir, 
-        is_file: metadata.is_file, 
-        modified_iso: to_iso(metadata.modified_at), 
-        created_iso: to_iso(metadata.created_at), 
-        accessed_iso: to_iso(metadata.accessed_at), 
+        size: fs_metadata.len, 
+        is_dir: fs_metadata.is_dir, 
+        is_file: fs_metadata.is_file, 
+        modified_iso: to_iso(fs_metadata.modified_at_ms), 
+        created_iso: to_iso(fs_metadata.created_at_ms), 
+        accessed_iso: to_iso(fs_metadata.accessed_at_ms), 
         permissions_octal: perms 
     })
 }
@@ -288,10 +293,12 @@ pub async fn mcp_read_multiple_files(deps: &ToolDependencies, params: ReadMultip
                     else {
                         let mime = mime_guess::from_path(&val_path).first_or_octet_stream().to_string();
                         if is_image_mime_mcp(&mime) {
-                            deps.app_handle.read_binary_file(FilePath::Path(val_path)).await.map_err(|e|AppError::PluginError{plugin:"fs".to_string(), message:e.to_string()})
+                            deps.app_handle.fs().read(FilePath::Path(val_path), None).await
+                                .map_err(|e|AppError::PluginError{plugin:"fs".to_string(), message:e.to_string()})
                                 .map(|b| FileContentMCP{path:path_str.clone(), text_content:None, image_data_base64:Some(BASE64_STANDARD.encode(&b)), mime_type:mime, lines_read:None, total_lines:None, truncated:None, error:None})
                         } else {
-                            deps.app_handle.read_text_file(FilePath::Path(val_path), None::<FsReadTextFileOptions>).await.map_err(|e|AppError::PluginError{plugin:"fs".to_string(), message:e.to_string()})
+                            deps.app_handle.fs().read_text_file(FilePath::Path(val_path), None).await
+                                .map_err(|e|AppError::PluginError{plugin:"fs".to_string(), message:e.to_string()})
                                 .map(|txt| { let lc=txt.lines().count(); FileContentMCP{path:path_str.clone(), text_content:Some(txt), image_data_base64:None, mime_type:mime, lines_read:Some(lc), total_lines:Some(lc), truncated:Some(false), error:None}})
                         }
                     }
@@ -309,14 +316,14 @@ pub async fn mcp_read_multiple_files(deps: &ToolDependencies, params: ReadMultip
 
 #[instrument(skip(app_handle, pattern_lower, matches, config_guard), fields(dir = %dir_to_search.display()))]
 async fn search_files_recursive_mcp_internal(
-    app_handle: &AppHandle,
+    app_handle: &tauri::AppHandle,
     dir_to_search: PathBuf,
     pattern_lower: &str,
     matches: &mut Vec<String>,
     current_depth: usize,
     max_depth: usize,
     files_root_for_relative_path: &Path,
-    config_guard: &RwLockReadGuard<'_, Config>, // Pass as reference
+    config_guard: &RwLockReadGuard<'_, Config>, 
 ) -> Result<(), AppError> {
     if current_depth > max_depth { return Ok(()); }
     
@@ -324,17 +331,17 @@ async fn search_files_recursive_mcp_internal(
         warn!(path = %dir_to_search.display(), "Search skipped: path not allowed by FS scope.");
         return Ok(());
     }
-     if validate_and_normalize_path(dir_to_search.to_str().unwrap_or_default(), config_guard, true, false).is_err() { // Pass config_guard by reference
+     if validate_and_normalize_path(dir_to_search.to_str().unwrap_or_default(), config_guard, true, false).is_err() { 
         warn!(path = %dir_to_search.display(), "Search skipped: path not allowed by config.");
         return Ok(());
     }
 
-    let dir_entries_result = app_handle.read_dir(FilePath::Path(dir_to_search.clone()), Some(FsDirOptions { recursive: false })).await;
+    let dir_entries_result = app_handle.fs().read_dir(FilePath::Path(dir_to_search.clone()), Some(DirOperationOptions { recursive: Some(false), base_dir: None })).await;
     let dir_entries = match dir_entries_result {
         Ok(entries) => entries,
         Err(e) => {
             warn!(path = %dir_to_search.display(), error = %e, "Could not read directory during search_files");
-            return Ok(());
+            return Ok(()); // Don't fail the whole search for one unreadable dir
         }
     };
 
@@ -349,8 +356,8 @@ async fn search_files_recursive_mcp_internal(
                 matches.push(full_path.to_string_lossy().into_owned());
             }
         }
-        if entry_data.is_dir.unwrap_or(false) && current_depth < max_depth {
-            search_files_recursive_mcp_internal(app_handle, full_path, pattern_lower, matches, current_depth + 1, max_depth, files_root_for_relative_path, config_guard).await?; // Pass config_guard by reference
+        if entry_data.is_dir.unwrap_or(false) && current_depth < max_depth { // Check is_dir from DirEntry
+            search_files_recursive_mcp_internal(app_handle, full_path, pattern_lower, matches, current_depth + 1, max_depth, files_root_for_relative_path, config_guard).await?; 
         }
     }
     Ok(())
@@ -359,20 +366,17 @@ async fn search_files_recursive_mcp_internal(
 #[instrument(skip(deps, params), fields(path = %params.path, pattern = %params.pattern))]
 pub async fn mcp_search_files(deps: &ToolDependencies, params: SearchFilesParamsMCP) -> Result<SearchFilesResultMCP, AppError> {
     let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-    let root_search_path = validate_and_normalize_path(&params.path, &config_guard, true, false)?; // Pass borrowed string
+    let root_search_path = validate_and_normalize_path(&params.path, &config_guard, true, false)?; 
     let files_root_clone = config_guard.files_root.clone();
     
     let app_handle_clone = deps.app_handle.clone();
-    // let config_state_clone = deps.config_state.clone(); // No longer needed to clone Arc for RwLockReadGuard
     let pattern_lower_clone = params.pattern.to_lowercase();
     let max_depth_clone = params.max_depth;
     let recursive_clone = params.recursive;
 
-    // Pass config_guard by reference to the async block
     let search_operation = async {
         let mut matches = Vec::new();
         
-        // The config_guard is already acquired and passed by reference
         if recursive_clone { 
             search_files_recursive_mcp_internal(&app_handle_clone, root_search_path.clone(), &pattern_lower_clone, &mut matches, 0, max_depth_clone, &files_root_clone, &config_guard).await?; 
         } else {
@@ -380,7 +384,8 @@ pub async fn mcp_search_files(deps: &ToolDependencies, params: SearchFilesParams
                  warn!(path = %root_search_path.display(), "Search skipped: path not allowed by scope or config.");
                  return Ok(matches);
             }
-            let dir_entries = app_handle_clone.read_dir(FilePath::Path(root_search_path), Some(FsDirOptions { recursive: false })).await.map_err(|e| AppError::PluginError { plugin: "fs".to_string(), message: e.to_string() })?;
+            let dir_entries = app_handle_clone.fs().read_dir(FilePath::Path(root_search_path), Some(DirOperationOptions { recursive: Some(false), base_dir: None })).await
+                .map_err(|e| AppError::PluginError { plugin: "fs".to_string(), message: e.to_string() })?;
             for entry_data in dir_entries {
                 let entry_name = entry_data.name.as_ref().map_or_else(String::new, |n| n.to_lowercase());
                  if entry_name.contains(&pattern_lower_clone) {

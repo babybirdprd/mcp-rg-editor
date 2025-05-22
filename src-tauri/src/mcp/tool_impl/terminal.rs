@@ -5,10 +5,10 @@ use crate::commands::terminal_commands::ActiveSession;
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::{Emitter}; // Removed AppHandle, Runtime, Manager
-use tauri_plugin_shell::{process::CommandEvent, ShellExt, process::Command as TauriShellCommand}; // Removed CommandChild
+use tauri::{Emitter}; 
+use tauri_plugin_shell::{process::CommandEvent, ShellExt, process::Command as TauriShellCommand, ShellError};
 use tokio::sync::Mutex as TokioMutex;
-use tokio::time::{timeout, Duration, Instant as TokioInstant}; // Removed error::Elapsed
+use tokio::time::{timeout, Duration, Instant as TokioInstant, error::Elapsed as ElapsedTimeoutError};
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 use chrono::Utc;
@@ -111,10 +111,8 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
             break;
         }
         
-        // rx.recv() returns Option<Result<CommandEvent, ShellError>>
-        // The timeout is for the recv() operation itself.
         match timeout(Duration::from_millis(50), rx.recv()).await {
-            Ok(Some(Ok(event))) => { // Successfully received an event
+            Ok(Ok(Some(event))) => { // Timeout didn't occur, and rx.recv() got Some(Ok(event))
                 match event {
                     CommandEvent::Stdout(line) => initial_stdout_lines.push(String::from_utf8_lossy(&line).into_owned()),
                     CommandEvent::Stderr(line) => initial_stderr_lines.push(String::from_utf8_lossy(&line).into_owned()),
@@ -122,13 +120,13 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
                     CommandEvent::Error(msg) => { error!("Cmd error during initial read: {}", msg); early_exit_code = Some(-1); break; }
                     _ => {} // Other events like Pid
                 }
-            }
-            Ok(Some(Err(shell_error))) => { // ShellError from the stream
-                error!("rx.recv shell error: {:?}", shell_error); early_exit_code = Some(-2); break;
-            }
-            Ok(None) => { // Stream ended
+            },
+            Ok(Ok(None)) => { // Timeout didn't occur, but stream ended
                 break;
-            }
+            },
+            Ok(Err(shell_error)) => { // Timeout didn't occur, but rx.recv() got Some(Err(shell_error))
+                 error!("rx.recv shell error: {:?}", shell_error); early_exit_code = Some(-2); break;
+            },
             Err(_elapsed_err) => { /* timeout for this 50ms iteration, continue loop */ }
         }
     }
@@ -144,27 +142,29 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Some(Ok(CommandEvent::Stdout(line))) => {
-                        app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "stdout", "data": String::from_utf8_lossy(&line).into_owned()})).unwrap_or_else(|e| error!("Emit stdout failed: {}", e));
-                    }
-                    Some(Ok(CommandEvent::Stderr(line))) => {
-                        app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "stderr", "data": String::from_utf8_lossy(&line).into_owned()})).unwrap_or_else(|e| error!("Emit stderr failed: {}", e));
-                    }
-                    Some(Ok(CommandEvent::Terminated(payload))) => {
-                        info!(sid = %session_id_clone_for_task, code = ?payload.code, "Background task: Command terminated");
-                        *active_session_clone_for_task.exit_code.lock().await = payload.code;
-                        app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "terminated", "code": payload.code, "signal": payload.signal })).unwrap_or_else(|e| error!("Emit terminated failed: {}", e));
-                        sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
-                        break;
-                    }
-                    Some(Ok(CommandEvent::Error(message))) => {
-                        error!(sid = %session_id_clone_for_task, message = %message, "Background task: Command error in stream");
-                        *active_session_clone_for_task.exit_code.lock().await = Some(-1);
-                        app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "error", "data": message })).unwrap_or_else(|e| error!("Emit error failed: {}", e));
-                        sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
-                        break;
-                    }
-                    Some(Ok(_other_event)) => { /* e.g. CommandEvent::Pid - can ignore or log */ }
+                    Some(Ok(event_from_channel)) => match event_from_channel {
+                        CommandEvent::Stdout(line) => {
+                            app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "stdout", "data": String::from_utf8_lossy(&line).into_owned()})).unwrap_or_else(|e| error!("Emit stdout failed: {}", e));
+                        }
+                        CommandEvent::Stderr(line) => {
+                            app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "stderr", "data": String::from_utf8_lossy(&line).into_owned()})).unwrap_or_else(|e| error!("Emit stderr failed: {}", e));
+                        }
+                        CommandEvent::Terminated(payload) => {
+                            info!(sid = %session_id_clone_for_task, code = ?payload.code, "Background task: Command terminated");
+                            *active_session_clone_for_task.exit_code.lock().await = payload.code;
+                            app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "terminated", "code": payload.code, "signal": payload.signal })).unwrap_or_else(|e| error!("Emit terminated failed: {}", e));
+                            sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
+                            break;
+                        }
+                        CommandEvent::Error(message) => {
+                            error!(sid = %session_id_clone_for_task, message = %message, "Background task: Command error in stream");
+                            *active_session_clone_for_task.exit_code.lock().await = Some(-1);
+                            app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "error", "data": message })).unwrap_or_else(|e| error!("Emit error failed: {}", e));
+                            sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
+                            break;
+                        }
+                        _other_event => { /* e.g. CommandEvent::Pid - can ignore or log */ }
+                    },
                     Some(Err(shell_error)) => { // ShellError from the stream in background task
                         error!(sid = %session_id_clone_for_task, error = ?shell_error, "Background task: Shell error receiving from command stream");
                         *active_session_clone_for_task.exit_code.lock().await = Some(-2); // Indicate receive error
@@ -202,30 +202,24 @@ pub async fn mcp_force_terminate_session(deps: &ToolDependencies, params: ForceT
     let session_id_to_terminate = params.session_id;
     if let Some(session_arc) = deps.active_sessions_map.lock().await.get(&session_id_to_terminate).cloned() {
         let mut child_opt_guard = session_arc.process_child.lock().await;
-        if let Some(child_to_kill_instance) = child_opt_guard.take() { // Take ownership by removing from Option
-            // child_to_kill_instance is CommandChild
-            // .kill() consumes self.
+        if let Some(child_to_kill_instance) = child_opt_guard.take() { 
             match child_to_kill_instance.kill() {
                 Ok(_) => {
                     info!(sid = %session_id_to_terminate, pid = ?session_arc.pid, "MCP Tool: Termination signal sent.");
-                    *session_arc.exit_code.lock().await = Some(-9); // Arbitrary code for killed
+                    *session_arc.exit_code.lock().await = Some(-9); 
                     deps.active_sessions_map.lock().await.remove(&session_id_to_terminate);
                     Ok(ForceTerminateResultMCP { session_id: session_id_to_terminate, success: true, message: "Termination signal sent.".into() })
                 }
                 Err(e) => {
                     warn!(sid = %session_id_to_terminate, pid = ?session_arc.pid, error = %e, "MCP Tool: Failed to send kill signal");
-                    // Since kill() consumed child_to_kill_instance, we cannot put it back.
-                    // The child is gone from our perspective. If kill failed, it might still be running OS-side.
                     if session_arc.exit_code.lock().await.is_none() {
-                        *session_arc.exit_code.lock().await = Some(-10); // Arbitrary code for kill fail
+                        *session_arc.exit_code.lock().await = Some(-10); 
                     }
-                    // We can't put it back, so just remove from map as we can't manage it anymore.
                     deps.active_sessions_map.lock().await.remove(&session_id_to_terminate);
                     Ok(ForceTerminateResultMCP { session_id: session_id_to_terminate, success: false, message: format!("Kill signal failed: {}. Session removed from tracking.", e) })
                 }
             }
         } else {
-            // Child already taken/terminated from Option
             Ok(ForceTerminateResultMCP { session_id: session_id_to_terminate, success: true, message: "Process already terminated or not found in session's Option.".into() })
         }
     } else { Err(AppError::SessionNotFound(session_id_to_terminate)) }
