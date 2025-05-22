@@ -26,7 +26,7 @@ tauri-plugin-notification = { git = "https://github.com/tauri-apps/plugins-works
 
 # MCP SDK Dependencies
 rust-mcp-sdk = "0.2.6" # As per your provided rust-mcp-sdk-llms.txt
-rust-mcp-schema = "0.4.0" # As per your provided rust-mcp-sdk-llms.txt
+rust-mcp-schema = { version = "0.4.0", features = ["latest"] } # MODIFIED: Added latest feature
 rust-mcp-transport = "0.2.3" # As per your provided rust-mcp-sdk-llms.txt
 async-trait = "0.1.80" # Updated version, check compatibility if issues arise
 

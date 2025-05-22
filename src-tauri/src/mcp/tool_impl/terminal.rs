@@ -6,9 +6,9 @@ use crate::commands::terminal_commands::ActiveSession;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{Emitter}; 
-use tauri_plugin_shell::{process::CommandEvent, ShellExt, process::Command as TauriShellCommand, ShellError};
+use tauri_plugin_shell::{process::CommandEvent, ShellExt, process::Command as TauriShellCommand, Error as ShellError}; // MODIFIED: ShellError -> Error as ShellError
 use tokio::sync::Mutex as TokioMutex;
-use tokio::time::{timeout, Duration, Instant as TokioInstant, error::Elapsed as ElapsedTimeoutError};
+use tokio::time::{timeout, Duration, Instant as TokioInstant}; // MODIFIED: Removed unused error::Elapsed
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 use chrono::Utc;
@@ -111,8 +111,9 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
             break;
         }
         
+        // MODIFIED: Corrected match patterns for timeout and rx.recv()
         match timeout(Duration::from_millis(50), rx.recv()).await {
-            Ok(Ok(Some(event))) => { // Timeout didn't occur, and rx.recv() got Some(Ok(event))
+            Ok(Some(Ok(event))) => { // Event received from stream
                 match event {
                     CommandEvent::Stdout(line) => initial_stdout_lines.push(String::from_utf8_lossy(&line).into_owned()),
                     CommandEvent::Stderr(line) => initial_stderr_lines.push(String::from_utf8_lossy(&line).into_owned()),
@@ -121,11 +122,11 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
                     _ => {} // Other events like Pid
                 }
             },
-            Ok(Ok(None)) => { // Timeout didn't occur, but stream ended
-                break;
-            },
-            Ok(Err(shell_error)) => { // Timeout didn't occur, but rx.recv() got Some(Err(shell_error))
+            Ok(Some(Err(shell_error))) => { // Error from stream
                  error!("rx.recv shell error: {:?}", shell_error); early_exit_code = Some(-2); break;
+            },
+            Ok(None) => { // Stream ended
+                break;
             },
             Err(_elapsed_err) => { /* timeout for this 50ms iteration, continue loop */ }
         }
@@ -141,29 +142,32 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
     if early_exit_code.is_none() {
         tokio::spawn(async move {
             loop {
+                // MODIFIED: Corrected match patterns for rx.recv().await
                 match rx.recv().await {
-                    Some(Ok(event_from_channel)) => match event_from_channel {
-                        CommandEvent::Stdout(line) => {
-                            app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "stdout", "data": String::from_utf8_lossy(&line).into_owned()})).unwrap_or_else(|e| error!("Emit stdout failed: {}", e));
+                    Some(Ok(event_from_channel)) => { // event_from_channel is CommandEvent
+                        match event_from_channel {
+                            CommandEvent::Stdout(line) => {
+                                app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "stdout", "data": String::from_utf8_lossy(&line).into_owned()})).unwrap_or_else(|e| error!("Emit stdout failed: {}", e));
+                            }
+                            CommandEvent::Stderr(line) => {
+                                app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "stderr", "data": String::from_utf8_lossy(&line).into_owned()})).unwrap_or_else(|e| error!("Emit stderr failed: {}", e));
+                            }
+                            CommandEvent::Terminated(payload) => {
+                                info!(sid = %session_id_clone_for_task, code = ?payload.code, "Background task: Command terminated");
+                                *active_session_clone_for_task.exit_code.lock().await = payload.code;
+                                app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "terminated", "code": payload.code, "signal": payload.signal })).unwrap_or_else(|e| error!("Emit terminated failed: {}", e));
+                                sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
+                                break;
+                            }
+                            CommandEvent::Error(message) => {
+                                error!(sid = %session_id_clone_for_task, message = %message, "Background task: Command error in stream");
+                                *active_session_clone_for_task.exit_code.lock().await = Some(-1);
+                                app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "error", "data": message })).unwrap_or_else(|e| error!("Emit error failed: {}", e));
+                                sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
+                                break;
+                            }
+                            _other_event => { /* e.g. CommandEvent::Pid - can ignore or log */ }
                         }
-                        CommandEvent::Stderr(line) => {
-                            app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "stderr", "data": String::from_utf8_lossy(&line).into_owned()})).unwrap_or_else(|e| error!("Emit stderr failed: {}", e));
-                        }
-                        CommandEvent::Terminated(payload) => {
-                            info!(sid = %session_id_clone_for_task, code = ?payload.code, "Background task: Command terminated");
-                            *active_session_clone_for_task.exit_code.lock().await = payload.code;
-                            app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "terminated", "code": payload.code, "signal": payload.signal })).unwrap_or_else(|e| error!("Emit terminated failed: {}", e));
-                            sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
-                            break;
-                        }
-                        CommandEvent::Error(message) => {
-                            error!(sid = %session_id_clone_for_task, message = %message, "Background task: Command error in stream");
-                            *active_session_clone_for_task.exit_code.lock().await = Some(-1);
-                            app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "error", "data": message })).unwrap_or_else(|e| error!("Emit error failed: {}", e));
-                            sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
-                            break;
-                        }
-                        _other_event => { /* e.g. CommandEvent::Pid - can ignore or log */ }
                     },
                     Some(Err(shell_error)) => { // ShellError from the stream in background task
                         error!(sid = %session_id_clone_for_task, error = ?shell_error, "Background task: Shell error receiving from command stream");

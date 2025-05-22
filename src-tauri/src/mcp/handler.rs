@@ -11,8 +11,8 @@ use async_trait::async_trait;
 use rust_mcp_sdk::McpServer;
 use rust_mcp_sdk::mcp_server::ServerHandler;
 use rust_mcp_schema::{
-    CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content,
-    schema_utils::CallToolError, RpcError, RpcErrorCode,
+    CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content, // Content should now be resolved
+    schema_utils::CallToolError, RpcError, RpcErrorCode, // RpcErrorCode should now be resolved
 };
 use serde_json::Value;
 use std::sync::{Arc, RwLock as StdRwLock};

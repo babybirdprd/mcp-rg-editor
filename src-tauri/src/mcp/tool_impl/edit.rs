@@ -8,7 +8,7 @@ use crate::utils::path_utils::validate_and_normalize_path;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri_plugin_fs::{FilePath, FsExt, FileOptions}; // Added FileOptions
-use tracing::{debug, instrument}; // Removed unused warn
+use tracing::{debug, instrument}; 
 use std::time::Instant;
 use chrono::Utc;
 use diff;
@@ -52,7 +52,8 @@ async fn read_file_for_edit_mcp_internal(
     if !app_handle.fs_scope().is_allowed(&path) {
         return Err(AppError::PathNotAllowed(format!("Read denied by FS scope: {}", path.display())));
     }
-    let original_content = app_handle.fs().read_text_file(FilePath::Path(path.clone()), None).await // Corrected path usage
+    // MODIFIED: Removed .await and Option for read_text_file
+    let original_content = app_handle.fs().read_text_file(FilePath::Path(path.clone())) 
         .map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to read text file {}: {}", path.display(), e)})?;
     Ok((original_content, path, detect_line_ending(&original_content)))
 }
@@ -66,7 +67,8 @@ async fn write_file_after_edit_mcp(
     if !app_handle.fs_scope().is_allowed(path_obj) {
         return Err(AppError::PathNotAllowed(format!("Write denied by FS scope: {}", path_obj.display())));
     }
-    app_handle.fs().write_text_file(FilePath::Path(path_obj.clone()), content, None).await // Corrected path usage
+    // MODIFIED: Removed .await and Option for write_text_file
+    app_handle.fs().write_text_file(FilePath::Path(path_obj.clone()), content, Some(FileOptions { append: Some(false), base_dir: None })) 
         .map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to write text file {}: {}", path_obj.display(), e)})
 }
 

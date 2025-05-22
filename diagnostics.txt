@@ -6,312 +6,353 @@ Message: unresolved imports `rust_mcp_schema::Content`, `rust_mcp_schema::RpcErr
 File: src-tauri\src\mcp\handler.rs
 Location: Line 14, Column 79
 Label: no `Content` in the root
-Code Context:     CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content, // Content is a valid top-level import
+Code Context:     CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content, // Content should now be resolved
   help: a similar name exists in the module
     Suggestion: RpcError
 Full Rendered Output:
 error[E0432]: unresolved imports `rust_mcp_schema::Content`, `rust_mcp_schema::RpcErrorCode`
   --> src-tauri\src\mcp\handler.rs:14:79
    |
-14 | ...llToolResult, ListToolsRequest, ListToolsResult, Tool, Content, // Content is a valid top-level import
-   |                                                           ^^^^^^^ no `Content` in the root
-15 | ...oolError, RpcError, RpcErrorCode, // RpcErrorCode is also a valid top-level import
-   |                        ^^^^^^^^^^^^
-   |                        |
-   |                        no `RpcErrorCode` in the root
-   |                        help: a similar name exists in the module: `RpcError`
+14 |     CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content, // Content should now be resolved
+   |                                                                               ^^^^^^^ no `Content` in the root
+15 |     schema_utils::CallToolError, RpcError, RpcErrorCode, // RpcErrorCode should now be resolved
+   |                                            ^^^^^^^^^^^^
+   |                                            |
+   |                                            no `RpcErrorCode` in the root
+   |                                            help: a similar name exists in the module: `RpcError`
 
 
 
 
 --- Message 2 ---
 Level: error
-Message: unresolved imports `tauri_plugin_fs::DirEntry`, `tauri_plugin_fs::ReadTextFileOptions`, `tauri_plugin_fs::WriteTextFileOptions`, `tauri_plugin_fs::DirOptions`
+Message: unresolved imports `tauri_plugin_fs::DirEntry`, `tauri_plugin_fs::DirOptions`, `tauri_plugin_fs::FileOptions`, `tauri_plugin_fs::Metadata`
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 11, Column 23
+Location: Line 10, Column 23
 Label: no `DirEntry` in the root
-Code Context: use tauri_plugin_fs::{DirEntry, FilePath, FsExt, ReadTextFileOptions as FsReadTextFileOptions, WriteTextFileOptions as FsWriteTextFileOptions, DirOptions as FsDirOptions}; // Renamed to avoid conflict
+Code Context: use tauri_plugin_fs::{DirEntry, FilePath, FsExt, DirOptions, FileOptions, Metadata as FsMetadata}; // MODIFIED: DirOperationOptions -> DirOptions, removed PathOptions
   help: consider importing one of these structs instead:
 std::fs::DirEntry
 tokio::fs::DirEntry
+  help: consider importing one of these structs instead:
+std::fs::Metadata
+log::Metadata
+tracing::Metadata
 Full Rendered Output:
-error[E0432]: unresolved imports `tauri_plugin_fs::DirEntry`, `tauri_plugin_fs::ReadTextFileOptions`, `tauri_plugin_fs::WriteTextFileOptions`, `tauri_plugin_fs::DirOptions`
-  --> src-tauri\src\mcp\tool_impl\filesystem.rs:11:23
+error[E0432]: unresolved imports `tauri_plugin_fs::DirEntry`, `tauri_plugin_fs::DirOptions`, `tauri_plugin_fs::FileOptions`, `tauri_plugin_fs::Metadata`
+  --> src-tauri\src\mcp\tool_impl\filesystem.rs:10:23
    |
-11 | ...::{DirEntry, FilePath, FsExt, ReadTextFileOptions as FsReadTextFileOptions, WriteTextFileOptions as FsWriteTextFileOptions, DirOptions as FsDirOptions}; ...
-   |       ^^^^^^^^                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^^^^^ no `DirOptions` in the root
-   |       |                          |                                             |
-   |       |                          |                                             no `WriteTextFileOptions` in the root
-   |       |                          no `ReadTextFileOptions` in the root
-   |       no `DirEntry` in the root
+10 | use tauri_plugin_fs::{DirEntry, FilePath, FsExt, DirOptions, FileOptions, Metadata as FsMetadata}; // MODIFIED: DirOperationOptions ...
+   |                       ^^^^^^^^                   ^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^ no `Metadata` in the root
+   |                       |                          |           |
+   |                       |                          |           no `FileOptions` in the root
+   |                       |                          no `DirOptions` in the root
+   |                       no `DirEntry` in the root
    |
    = help: consider importing one of these structs instead:
            std::fs::DirEntry
            tokio::fs::DirEntry
+   = help: consider importing one of these structs instead:
+           std::fs::Metadata
+           log::Metadata
+           tracing::Metadata
 
 
 
 
 --- Message 3 ---
 Level: error
-Message: unresolved import `tauri_plugin_log::TauriLogger`
-File: src-tauri\src\lib.rs
-Location: Line 23, Column 5
-Label: no `TauriLogger` in the root
-Code Context: use tauri_plugin_log::TauriLogger; // Assuming this is the correct type for the layer
+Message: unresolved import `tauri_plugin_fs::FileOptions`
+File: src-tauri\src\mcp\tool_impl\edit.rs
+Location: Line 10, Column 40
+Label: no `FileOptions` in the root
+Code Context: use tauri_plugin_fs::{FilePath, FsExt, FileOptions}; // Added FileOptions
 Full Rendered Output:
-error[E0432]: unresolved import `tauri_plugin_log::TauriLogger`
-  --> src-tauri\src\lib.rs:23:5
+error[E0432]: unresolved import `tauri_plugin_fs::FileOptions`
+  --> src-tauri\src\mcp\tool_impl\edit.rs:10:40
    |
-23 | use tauri_plugin_log::TauriLogger; // Assuming this is the correct type for the layer
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `TauriLogger` in the root
+10 | use tauri_plugin_fs::{FilePath, FsExt, FileOptions}; // Added FileOptions
+   |                                        ^^^^^^^^^^^ no `FileOptions` in the root
 
 
 
 
 --- Message 4 ---
 Level: warning
-Message: unused import: `warn`
-File: src-tauri\src\mcp\tool_impl\edit.rs
-Location: Line 13, Column 34
-Code Context: use tracing::{debug, instrument, warn}; // Corrected warn import
+Message: unused import: `Error as ShellError`
+File: src-tauri\src\mcp\tool_impl\terminal.rs
+Location: Line 9, Column 98
+Code Context: use tauri_plugin_shell::{process::CommandEvent, ShellExt, process::Command as TauriShellCommand, Error as ShellError}; // MODIFIED: ShellError -> Error as ShellError
   note: `#[warn(unused_imports)]` on by default
   help: remove the unused import
 Full Rendered Output:
-warning: unused import: `warn`
-  --> src-tauri\src\mcp\tool_impl\edit.rs:13:34
-   |
-13 | use tracing::{debug, instrument, warn}; // Corrected warn import
-   |                                  ^^^^
-   |
-   = note: `#[warn(unused_imports)]` on by default
+warning: unused import: `Error as ShellError`
+ --> src-tauri\src\mcp\tool_impl\terminal.rs:9:98
+  |
+9 | use tauri_plugin_shell::{process::CommandEvent, ShellExt, process::Command as TauriShellCommand, Error as ShellError}; // MODIFIED: S...
+  |                                                                                                  ^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
 
 
 
 
 --- Message 5 ---
 Level: error
-Message: no method named `read_binary_file` found for struct `AppHandle` in the current scope
+Message: no method named `read_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 158, Column 37
-Label: method not found in `AppHandle`
-Code Context:         let bytes = deps.app_handle.read_binary_file(FilePath::Path(path)).await.map_err(|e| AppError::PluginError{ plugin:"fs".to_string(), message:e.to_string()})?;
+Location: Line 163, Column 49
+Label: method not found in `&Fs<Wry<EventLoopMessage>>`
+Code Context:         let full_content = deps.app_handle.fs().read_text_file(FilePath::Path(path))
 Full Rendered Output:
-error[E0599]: no method named `read_binary_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:158:37
+error[E0599]: no method named `read_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+   --> src-tauri\src\mcp\tool_impl\filesystem.rs:163:49
     |
-158 | ...   let bytes = deps.app_handle.read_binary_file(FilePath::Path(path)).await.map_err(|e| AppError::PluginEr...
-    |                                   ^^^^^^^^^^^^^^^^ method not found in `AppHandle`
+163 |         let full_content = deps.app_handle.fs().read_text_file(FilePath::Path(path))
+    |                                                 ^^^^^^^^^^^^^^ method not found in `&Fs<Wry<EventLoopMessage>>`
 
 
 
 
 --- Message 6 ---
 Level: error
-Message: no method named `read_text_file` found for struct `AppHandle` in the current scope
+Message: no method named `exists` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 161, Column 44
-Label: method not found in `AppHandle`
-Code Context:         let full_content = deps.app_handle.read_text_file(FilePath::Path(path), None::<FsReadTextFileOptions>).await.map_err(|e| AppError::PluginError{ plugin:"fs".to_string(), message:e.to_string()})?;
+Location: Line 192, Column 92
+Label: method not found in `&Fs<Wry<EventLoopMessage>>`
+Code Context:     let final_content_str = if params.mode == WriteModeMCP::Append && deps.app_handle.fs().exists(FilePath::Path(path.clone())).unwrap_or(false) {
 Full Rendered Output:
-error[E0599]: no method named `read_text_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:161:44
+error[E0599]: no method named `exists` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+   --> src-tauri\src\mcp\tool_impl\filesystem.rs:192:92
     |
-161 | ...   let full_content = deps.app_handle.read_text_file(FilePath::Path(path), None::<FsReadTextFileOptions>)....
-    |                                          ^^^^^^^^^^^^^^ method not found in `AppHandle`
+192 | ...MCP::Append && deps.app_handle.fs().exists(FilePath::Path(path.clone())).unwrap_or(false) {
+    |                                        ^^^^^^ method not found in `&Fs<Wry<EventLoopMessage>>`
 
 
 
 
 --- Message 7 ---
 Level: error
-Message: no method named `exists` found for struct `AppHandle` in the current scope
+Message: no method named `read_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 188, Column 87
-Code Context:     let final_content_str = if params.mode == WriteModeMCP::Append && deps.app_handle.exists(FilePath::Path(path.clone()), None).await.unwrap_or(false) {
-  help: there is a method `exit` with a similar name, but with different arguments
+Location: Line 193, Column 57
+Label: method not found in `&Fs<Wry<EventLoopMessage>>`
+Code Context:         let existing_content_str = deps.app_handle.fs().read_text_file(FilePath::Path(path.clone())).unwrap_or_default();
 Full Rendered Output:
-error[E0599]: no method named `exists` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:188:87
+error[E0599]: no method named `read_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+   --> src-tauri\src\mcp\tool_impl\filesystem.rs:193:57
     |
-188 |     let final_content_str = if params.mode == WriteModeMCP::Append && deps.app_handle.exists(FilePath::Path(p...
-    |                                                                                       ^^^^^^
-    |
-help: there is a method `exit` with a similar name, but with different arguments
-   --> C:\Users\Steve Business\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tauri-2.5.1\src\app.rs:528:3
-    |
-528 |   pub fn exit(&self, exit_code: i32) {
-    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+193 |         let existing_content_str = deps.app_handle.fs().read_text_file(FilePath::Path(path.clone())).unwrap_or_default();
+    |                                                         ^^^^^^^^^^^^^^ method not found in `&Fs<Wry<EventLoopMessage>>`
 
 
 
 
 --- Message 8 ---
 Level: error
-Message: no method named `read_text_file` found for struct `AppHandle` in the current scope
+Message: no method named `write_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 189, Column 52
-Label: method not found in `AppHandle`
-Code Context:         let existing_content_str = deps.app_handle.read_text_file(FilePath::Path(path.clone()), None::<FsReadTextFileOptions>).await.unwrap_or_default();
+Location: Line 205, Column 26
+Label: method not found in `&Fs<Wry<EventLoopMessage>>`
+Code Context:     deps.app_handle.fs().write_text_file(FilePath::Path(path.clone()), final_content_str, Some(fs_options))
 Full Rendered Output:
-error[E0599]: no method named `read_text_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:189:52
+error[E0599]: no method named `write_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+   --> src-tauri\src\mcp\tool_impl\filesystem.rs:205:26
     |
-189 | ...   let existing_content_str = deps.app_handle.read_text_file(FilePath::Path(path.clone()), None::<FsReadTe...
-    |                                                  ^^^^^^^^^^^^^^ method not found in `AppHandle`
+205 |     deps.app_handle.fs().write_text_file(FilePath::Path(path.clone()), final_content_str, Some(fs_options))
+    |                          ^^^^^^^^^^^^^^^ method not found in `&Fs<Wry<EventLoopMessage>>`
 
 
 
 
 --- Message 9 ---
 Level: error
-Message: no method named `write_text_file` found for struct `AppHandle` in the current scope
+Message: no method named `create_dir` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 202, Column 21
-Label: method not found in `AppHandle`
-Code Context:     deps.app_handle.write_text_file(options).await.map_err(|e|AppError::PluginError{plugin:"fs".to_string(), message:e.to_string()})?;
+Location: Line 217, Column 26
+Label: method not found in `&Fs<Wry<EventLoopMessage>>`
+Code Context:     deps.app_handle.fs().create_dir(FilePath::Path(path), Some(DirOptions { recursive: Some(true), base_dir: None }))
 Full Rendered Output:
-error[E0599]: no method named `write_text_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:202:21
+error[E0599]: no method named `create_dir` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+   --> src-tauri\src\mcp\tool_impl\filesystem.rs:217:26
     |
-202 |     deps.app_handle.write_text_file(options).await.map_err(|e|AppError::PluginError{plugin:"fs".to_string(), ...
-    |                     ^^^^^^^^^^^^^^^ method not found in `AppHandle`
+217 |     deps.app_handle.fs().create_dir(FilePath::Path(path), Some(DirOptions { recursive: Some(true), base_dir: None }))
+    |                          ^^^^^^^^^^ method not found in `&Fs<Wry<EventLoopMessage>>`
 
 
 
 
 --- Message 10 ---
 Level: error
-Message: no method named `create_dir` found for struct `AppHandle` in the current scope
+Message: no method named `read_dir` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 212, Column 21
-Label: method not found in `AppHandle`
-Code Context:     deps.app_handle.create_dir(FilePath::Path(path), Some(FsDirOptions { recursive: true })).await.map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
+Location: Line 228, Column 45
+Code Context:     let entries_data = deps.app_handle.fs().read_dir(FilePath::Path(path), Some(DirOptions { recursive: Some(false), base_dir: None }))
+  help: there is a method `read` with a similar name, but with different arguments
 Full Rendered Output:
-error[E0599]: no method named `create_dir` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:212:21
+error[E0599]: no method named `read_dir` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+   --> src-tauri\src\mcp\tool_impl\filesystem.rs:228:45
     |
-212 |     deps.app_handle.create_dir(FilePath::Path(path), Some(FsDirOptions { recursive: true })).await.map_err(|e...
-    |                     ^^^^^^^^^^ method not found in `AppHandle`
+228 |     let entries_data = deps.app_handle.fs().read_dir(FilePath::Path(path), Some(DirOptions { recursive: Some(false), base_dir: None...
+    |                                             ^^^^^^^^
+    |
+help: there is a method `read` with a similar name, but with different arguments
+   --> C:\Users\Steve Business\.cargo\git\checkouts\plugins-workspace-bac95421cc662c04\764e8f7\plugins\fs\src\lib.rs:331:5
+    |
+331 |     pub fn read<P: Into<FilePath>>(&self, path: P) -> std::io::Result<Vec<u8>> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 
 
 --- Message 11 ---
 Level: error
-Message: no method named `read_dir` found for struct `AppHandle` in the current scope
+Message: no method named `rename` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 221, Column 40
-Label: method not found in `AppHandle`
-Code Context:     let entries_data = deps.app_handle.read_dir(FilePath::Path(path), Some(FsDirOptions { recursive: false })).await.map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
+Location: Line 242, Column 26
+Code Context:     deps.app_handle.fs().rename(FilePath::Path(source_path), FilePath::Path(dest_path))
+  help: there is a method `read` with a similar name, but with different arguments
 Full Rendered Output:
-error[E0599]: no method named `read_dir` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:221:40
+error[E0599]: no method named `rename` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+   --> src-tauri\src\mcp\tool_impl\filesystem.rs:242:26
     |
-221 |     let entries_data = deps.app_handle.read_dir(FilePath::Path(path), Some(FsDirOptions { recursive: false })...
-    |                                        ^^^^^^^^ method not found in `AppHandle`
+242 |     deps.app_handle.fs().rename(FilePath::Path(source_path), FilePath::Path(dest_path))
+    |                          ^^^^^^
+    |
+help: there is a method `read` with a similar name, but with different arguments
+   --> C:\Users\Steve Business\.cargo\git\checkouts\plugins-workspace-bac95421cc662c04\764e8f7\plugins\fs\src\lib.rs:331:5
+    |
+331 |     pub fn read<P: Into<FilePath>>(&self, path: P) -> std::io::Result<Vec<u8>> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 
 
 --- Message 12 ---
 Level: error
-Message: no method named `rename_file` found for struct `AppHandle` in the current scope
+Message: no method named `metadata` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 233, Column 21
-Label: method not found in `AppHandle`
-Code Context:     deps.app_handle.rename_file(FilePath::Path(source_path), FilePath::Path(dest_path)).await.map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
+Location: Line 254, Column 56
+Label: method not found in `&Fs<Wry<EventLoopMessage>>`
+Code Context:     let fs_metadata: FsMetadata = deps.app_handle.fs().metadata(FilePath::Path(path.clone()))
 Full Rendered Output:
-error[E0599]: no method named `rename_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:233:21
+error[E0599]: no method named `metadata` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+   --> src-tauri\src\mcp\tool_impl\filesystem.rs:254:56
     |
-233 |     deps.app_handle.rename_file(FilePath::Path(source_path), FilePath::Path(dest_path)).await.map_err(|e|AppE...
-    |                     ^^^^^^^^^^^ method not found in `AppHandle`
+254 |     let fs_metadata: FsMetadata = deps.app_handle.fs().metadata(FilePath::Path(path.clone()))
+    |                                                        ^^^^^^^^ method not found in `&Fs<Wry<EventLoopMessage>>`
 
 
 
 
 --- Message 13 ---
 Level: error
-Message: no method named `metadata` found for struct `AppHandle` in the current scope
+Message: no method named `read_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 242, Column 36
-Label: method not found in `AppHandle`
-Code Context:     let metadata = deps.app_handle.metadata(FilePath::Path(path.clone())).await.map_err(|e|AppError::PluginError{plugin:"fs".into(), message:e.to_string()})?;
+Location: Line 310, Column 50
+Label: method not found in `&Fs<Wry<EventLoopMessage>>`
+Code Context:                             deps.app_handle.fs().read_text_file(FilePath::Path(val_path))
 Full Rendered Output:
-error[E0599]: no method named `metadata` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:242:36
+error[E0599]: no method named `read_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+   --> src-tauri\src\mcp\tool_impl\filesystem.rs:310:50
     |
-242 |     let metadata = deps.app_handle.metadata(FilePath::Path(path.clone())).await.map_err(|e|AppError::PluginEr...
-    |                                    ^^^^^^^^ method not found in `AppHandle`
+310 | ...                   deps.app_handle.fs().read_text_file(FilePath::Path(val_path))
+    |                                            ^^^^^^^^^^^^^^ method not found in `&Fs<Wry<EventLoopMessage>>`
 
 
 
 
 --- Message 14 ---
 Level: error
-Message: no method named `read_binary_file` found for struct `AppHandle` in the current scope
+Message: no method named `read_dir` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 291, Column 45
-Label: method not found in `AppHandle`
-Code Context:                             deps.app_handle.read_binary_file(FilePath::Path(val_path)).await.map_err(|e|AppError::PluginError{plugin:"fs".to_string(), message:e.to_string()})
+Location: Line 350, Column 46
+Code Context:     let dir_entries_result = app_handle.fs().read_dir(FilePath::Path(dir_to_search.clone()), Some(DirOptions { recursive: Some(false), base_dir: None }));
+  help: there is a method `read` with a similar name, but with different arguments
 Full Rendered Output:
-error[E0599]: no method named `read_binary_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:291:45
+error[E0599]: no method named `read_dir` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+   --> src-tauri\src\mcp\tool_impl\filesystem.rs:350:46
     |
-291 | ...   deps.app_handle.read_binary_file(FilePath::Path(val_path)).await.map_err(|e|AppError::PluginError{plugi...
-    |                       ^^^^^^^^^^^^^^^^ method not found in `AppHandle`
+350 |     let dir_entries_result = app_handle.fs().read_dir(FilePath::Path(dir_to_search.clone()), Some(DirOptions { recursive: Some(fals...
+    |                                              ^^^^^^^^
+    |
+help: there is a method `read` with a similar name, but with different arguments
+   --> C:\Users\Steve Business\.cargo\git\checkouts\plugins-workspace-bac95421cc662c04\764e8f7\plugins\fs\src\lib.rs:331:5
+    |
+331 |     pub fn read<P: Into<FilePath>>(&self, path: P) -> std::io::Result<Vec<u8>> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 
 
 --- Message 15 ---
 Level: error
-Message: no method named `read_text_file` found for struct `AppHandle` in the current scope
+Message: no method named `read_dir` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
 File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 294, Column 45
-Label: method not found in `AppHandle`
-Code Context:                             deps.app_handle.read_text_file(FilePath::Path(val_path), None::<FsReadTextFileOptions>).await.map_err(|e|AppError::PluginError{plugin:"fs".to_string(), message:e.to_string()})
+Location: Line 438, Column 53
+Code Context:             let dir_entries = app_handle_clone.fs().read_dir(FilePath::Path(root_search_path), Some(DirOptions { recursive: Some(false), base_dir: None }))
+  help: there is a method `read` with a similar name, but with different arguments
 Full Rendered Output:
-error[E0599]: no method named `read_text_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:294:45
+error[E0599]: no method named `read_dir` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+   --> src-tauri\src\mcp\tool_impl\filesystem.rs:438:53
     |
-294 | ...   deps.app_handle.read_text_file(FilePath::Path(val_path), None::<FsReadTextFileOptions>).await.map_err(|...
-    |                       ^^^^^^^^^^^^^^ method not found in `AppHandle`
+438 | ...   let dir_entries = app_handle_clone.fs().read_dir(FilePath::Path(root_search_path), Some(DirOptions { recursive: Some(false), ...
+    |                                               ^^^^^^^^
+    |
+help: there is a method `read` with a similar name, but with different arguments
+   --> C:\Users\Steve Business\.cargo\git\checkouts\plugins-workspace-bac95421cc662c04\764e8f7\plugins\fs\src\lib.rs:331:5
+    |
+331 |     pub fn read<P: Into<FilePath>>(&self, path: P) -> std::io::Result<Vec<u8>> {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 
 
 --- Message 16 ---
 Level: error
-Message: no method named `read_dir` found for reference `&AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 332, Column 41
-Label: method not found in `&AppHandle`
-Code Context:     let dir_entries_result = app_handle.read_dir(FilePath::Path(dir_to_search.clone()), Some(FsDirOptions { recursive: false })).await;
+Message: mismatched types
+File: src-tauri\src\mcp\tool_impl\terminal.rs
+Location: Line 116, Column 21
+Label: expected `CommandEvent`, found `Result<_, _>`
+Code Context:             Ok(Some(Ok(event))) => { // Event received from stream
+  note: expected enum `CommandEvent`
+   found enum `std::result::Result<_, _>`
 Full Rendered Output:
-error[E0599]: no method named `read_dir` found for reference `&AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:332:41
+error[E0308]: mismatched types
+   --> src-tauri\src\mcp\tool_impl\terminal.rs:116:21
     |
-332 |     let dir_entries_result = app_handle.read_dir(FilePath::Path(dir_to_search.clone()), Some(FsDirOptions { r...
-    |                                         ^^^^^^^^ method not found in `&AppHandle`
+115 |         match timeout(Duration::from_millis(50), rx.recv()).await {
+    |               --------------------------------------------------- this expression has type `std::result::Result<std::option::Option<CommandEvent>, Elapsed>`
+116 |             Ok(Some(Ok(event))) => { // Event received from stream
+    |                     ^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
+    |
+    = note: expected enum `CommandEvent`
+               found enum `std::result::Result<_, _>`
 
 
 
 
 --- Message 17 ---
 Level: error
-Message: no method named `read_dir` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 383, Column 48
-Label: method not found in `AppHandle`
-Code Context:             let dir_entries = app_handle_clone.read_dir(FilePath::Path(root_search_path), Some(FsDirOptions { recursive: false })).await.map_err(|e| AppError::PluginError { plugin: "fs".to_string(), message: e.to_string() })?;
+Message: mismatched types
+File: src-tauri\src\mcp\tool_impl\terminal.rs
+Location: Line 125, Column 21
+Label: expected `CommandEvent`, found `Result<_, _>`
+Code Context:             Ok(Some(Err(shell_error))) => { // Error from stream
+  note: expected enum `CommandEvent`
+   found enum `std::result::Result<_, _>`
 Full Rendered Output:
-error[E0599]: no method named `read_dir` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:383:48
+error[E0308]: mismatched types
+   --> src-tauri\src\mcp\tool_impl\terminal.rs:125:21
     |
-383 | ...   let dir_entries = app_handle_clone.read_dir(FilePath::Path(root_search_path), Some(FsDirOptions { recur...
-    |                                          ^^^^^^^^ method not found in `AppHandle`
+115 |         match timeout(Duration::from_millis(50), rx.recv()).await {
+    |               --------------------------------------------------- this expression has type `std::result::Result<std::option::Option<CommandEvent>, Elapsed>`
+...
+125 |             Ok(Some(Err(shell_error))) => { // Error from stream
+    |                     ^^^^^^^^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
+    |
+    = note: expected enum `CommandEvent`
+               found enum `std::result::Result<_, _>`
 
 
 
@@ -320,19 +361,19 @@ error[E0599]: no method named `read_dir` found for struct `AppHandle` in the cur
 Level: error
 Message: mismatched types
 File: src-tauri\src\mcp\tool_impl\terminal.rs
-Location: Line 117, Column 21
+Location: Line 147, Column 26
 Label: expected `CommandEvent`, found `Result<_, _>`
-Code Context:             Ok(Some(Ok(event))) => { // Successfully received an event
+Code Context:                     Some(Ok(event_from_channel)) => { // event_from_channel is CommandEvent
   note: expected enum `CommandEvent`
    found enum `std::result::Result<_, _>`
 Full Rendered Output:
 error[E0308]: mismatched types
-   --> src-tauri\src\mcp\tool_impl\terminal.rs:117:21
+   --> src-tauri\src\mcp\tool_impl\terminal.rs:147:26
     |
-116 |         match timeout(Duration::from_millis(50), rx.recv()).await {
-    |               --------------------------------------------------- this expression has type `std::result::Result<std::option::Option<CommandEvent>, Elapsed>`
-117 |             Ok(Some(Ok(event))) => { // Successfully received an event
-    |                     ^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
+146 |                 match rx.recv().await {
+    |                       --------------- this expression has type `std::option::Option<CommandEvent>`
+147 |                     Some(Ok(event_from_channel)) => { // event_from_channel is CommandEvent
+    |                          ^^^^^^^^^^^^^^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
     |
     = note: expected enum `CommandEvent`
                found enum `std::result::Result<_, _>`
@@ -344,20 +385,20 @@ error[E0308]: mismatched types
 Level: error
 Message: mismatched types
 File: src-tauri\src\mcp\tool_impl\terminal.rs
-Location: Line 126, Column 21
+Location: Line 172, Column 26
 Label: expected `CommandEvent`, found `Result<_, _>`
-Code Context:             Ok(Some(Err(shell_error))) => { // ShellError from the stream
+Code Context:                     Some(Err(shell_error)) => { // ShellError from the stream in background task
   note: expected enum `CommandEvent`
    found enum `std::result::Result<_, _>`
 Full Rendered Output:
 error[E0308]: mismatched types
-   --> src-tauri\src\mcp\tool_impl\terminal.rs:126:21
+   --> src-tauri\src\mcp\tool_impl\terminal.rs:172:26
     |
-116 |         match timeout(Duration::from_millis(50), rx.recv()).await {
-    |               --------------------------------------------------- this expression has type `std::result::Result<std::option::Option<CommandEvent>, Elapsed>`
+146 |                 match rx.recv().await {
+    |                       --------------- this expression has type `std::option::Option<CommandEvent>`
 ...
-126 |             Ok(Some(Err(shell_error))) => { // ShellError from the stream
-    |                     ^^^^^^^^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
+172 |                     Some(Err(shell_error)) => { // ShellError from the stream in background task
+    |                          ^^^^^^^^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
     |
     = note: expected enum `CommandEvent`
                found enum `std::result::Result<_, _>`
@@ -367,394 +408,70 @@ error[E0308]: mismatched types
 
 --- Message 20 ---
 Level: error
-Message: mismatched types
-File: src-tauri\src\mcp\tool_impl\terminal.rs
-Location: Line 147, Column 26
-Label: expected `CommandEvent`, found `Result<_, _>`
-Code Context:                     Some(Ok(CommandEvent::Stdout(line))) => {
-  note: expected enum `CommandEvent`
-   found enum `std::result::Result<_, _>`
+Message: no method named `read_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+File: src-tauri\src\mcp\tool_impl\edit.rs
+Location: Line 56, Column 44
+Label: method not found in `&Fs<Wry<EventLoopMessage>>`
+Code Context:     let original_content = app_handle.fs().read_text_file(FilePath::Path(path.clone())) 
 Full Rendered Output:
-error[E0308]: mismatched types
-   --> src-tauri\src\mcp\tool_impl\terminal.rs:147:26
-    |
-146 |                 match rx.recv().await {
-    |                       --------------- this expression has type `std::option::Option<CommandEvent>`
-147 |                     Some(Ok(CommandEvent::Stdout(line))) => {
-    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
-    |
-    = note: expected enum `CommandEvent`
-               found enum `std::result::Result<_, _>`
+error[E0599]: no method named `read_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+  --> src-tauri\src\mcp\tool_impl\edit.rs:56:44
+   |
+56 |     let original_content = app_handle.fs().read_text_file(FilePath::Path(path.clone())) 
+   |                                            ^^^^^^^^^^^^^^ method not found in `&Fs<Wry<EventLoopMessage>>`
 
 
 
 
 --- Message 21 ---
 Level: error
-Message: mismatched types
-File: src-tauri\src\mcp\tool_impl\terminal.rs
-Location: Line 150, Column 26
-Label: expected `CommandEvent`, found `Result<_, _>`
-Code Context:                     Some(Ok(CommandEvent::Stderr(line))) => {
-  note: expected enum `CommandEvent`
-   found enum `std::result::Result<_, _>`
+Message: no method named `write_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+File: src-tauri\src\mcp\tool_impl\edit.rs
+Location: Line 71, Column 21
+Label: method not found in `&Fs<Wry<EventLoopMessage>>`
+Code Context:     app_handle.fs().write_text_file(FilePath::Path(path_obj.clone()), content, Some(FileOptions { append: Some(false), base_dir: None })) 
 Full Rendered Output:
-error[E0308]: mismatched types
-   --> src-tauri\src\mcp\tool_impl\terminal.rs:150:26
-    |
-146 |                 match rx.recv().await {
-    |                       --------------- this expression has type `std::option::Option<CommandEvent>`
-...
-150 |                     Some(Ok(CommandEvent::Stderr(line))) => {
-    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
-    |
-    = note: expected enum `CommandEvent`
-               found enum `std::result::Result<_, _>`
+error[E0599]: no method named `write_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
+  --> src-tauri\src\mcp\tool_impl\edit.rs:71:21
+   |
+71 |     app_handle.fs().write_text_file(FilePath::Path(path_obj.clone()), content, Some(FileOptions { append: Some(false), base_dir: Non...
+   |                     ^^^^^^^^^^^^^^^ method not found in `&Fs<Wry<EventLoopMessage>>`
 
 
 
 
 --- Message 22 ---
 Level: error
-Message: mismatched types
-File: src-tauri\src\mcp\tool_impl\terminal.rs
-Location: Line 153, Column 26
-Label: expected `CommandEvent`, found `Result<_, _>`
-Code Context:                     Some(Ok(CommandEvent::Terminated(payload))) => {
-  note: expected enum `CommandEvent`
-   found enum `std::result::Result<_, _>`
+Message: no method named `with_level` found for struct `tauri_plugin_log::Target` in the current scope
+File: src-tauri\src\lib.rs
+Location: Line 53, Column 9
+Code Context:         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
 Full Rendered Output:
-error[E0308]: mismatched types
-   --> src-tauri\src\mcp\tool_impl\terminal.rs:153:26
-    |
-146 |                 match rx.recv().await {
-    |                       --------------- this expression has type `std::option::Option<CommandEvent>`
-...
-153 |                     Some(Ok(CommandEvent::Terminated(payload))) => {
-    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
-    |
-    = note: expected enum `CommandEvent`
-               found enum `std::result::Result<_, _>`
+error[E0599]: no method named `with_level` found for struct `tauri_plugin_log::Target` in the current scope
+  --> src-tauri\src\lib.rs:55:12
+   |
+53 | /         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+54 | |             file_name: Some("app_backend.log".into()),
+55 | |         }).with_level(match level { // Set level for this specific target
+   | |           -^^^^^^^^^^ method not found in `Target`
+   | |___________|
+   |
 
 
 
 
 --- Message 23 ---
 Level: error
-Message: mismatched types
-File: src-tauri\src\mcp\tool_impl\terminal.rs
-Location: Line 160, Column 26
-Label: expected `CommandEvent`, found `Result<_, _>`
-Code Context:                     Some(Ok(CommandEvent::Error(message))) => {
-  note: expected enum `CommandEvent`
-   found enum `std::result::Result<_, _>`
-Full Rendered Output:
-error[E0308]: mismatched types
-   --> src-tauri\src\mcp\tool_impl\terminal.rs:160:26
-    |
-146 |                 match rx.recv().await {
-    |                       --------------- this expression has type `std::option::Option<CommandEvent>`
-...
-160 |                     Some(Ok(CommandEvent::Error(message))) => {
-    |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
-    |
-    = note: expected enum `CommandEvent`
-               found enum `std::result::Result<_, _>`
-
-
-
-
---- Message 24 ---
-Level: error
-Message: mismatched types
-File: src-tauri\src\mcp\tool_impl\terminal.rs
-Location: Line 167, Column 26
-Label: expected `CommandEvent`, found `Result<_, _>`
-Code Context:                     Some(Ok(_other_event)) => { /* e.g. CommandEvent::Pid - can ignore or log */ }
-  note: expected enum `CommandEvent`
-   found enum `std::result::Result<_, _>`
-Full Rendered Output:
-error[E0308]: mismatched types
-   --> src-tauri\src\mcp\tool_impl\terminal.rs:167:26
-    |
-146 |                 match rx.recv().await {
-    |                       --------------- this expression has type `std::option::Option<CommandEvent>`
-...
-167 |                     Some(Ok(_other_event)) => { /* e.g. CommandEvent::Pid - can ignore or log */ }
-    |                          ^^^^^^^^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
-    |
-    = note: expected enum `CommandEvent`
-               found enum `std::result::Result<_, _>`
-
-
-
-
---- Message 25 ---
-Level: error
-Message: mismatched types
-File: src-tauri\src\mcp\tool_impl\terminal.rs
-Location: Line 168, Column 26
-Label: expected `CommandEvent`, found `Result<_, _>`
-Code Context:                     Some(Err(shell_error)) => { // ShellError from the stream in background task
-  note: expected enum `CommandEvent`
-   found enum `std::result::Result<_, _>`
-Full Rendered Output:
-error[E0308]: mismatched types
-   --> src-tauri\src\mcp\tool_impl\terminal.rs:168:26
-    |
-146 |                 match rx.recv().await {
-    |                       --------------- this expression has type `std::option::Option<CommandEvent>`
-...
-168 |                     Some(Err(shell_error)) => { // ShellError from the stream in background task
-    |                          ^^^^^^^^^^^^^^^^ expected `CommandEvent`, found `Result<_, _>`
-    |
-    = note: expected enum `CommandEvent`
-               found enum `std::result::Result<_, _>`
-
-
-
-
---- Message 26 ---
-Level: error
-Message: no method named `read_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
-File: src-tauri\src\mcp\tool_impl\edit.rs
-Location: Line 59, Column 44
-Label: method not found in `&Fs<Wry<EventLoopMessage>>`
-Code Context:     let original_content = app_handle.fs().read_text_file(&path).await
-Full Rendered Output:
-error[E0599]: no method named `read_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
-  --> src-tauri\src\mcp\tool_impl\edit.rs:59:44
-   |
-59 |     let original_content = app_handle.fs().read_text_file(&path).await
-   |                                            ^^^^^^^^^^^^^^ method not found in `&Fs<Wry<EventLoopMessage>>`
-
-
-
-
---- Message 27 ---
-Level: error
-Message: no method named `write_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
-File: src-tauri\src\mcp\tool_impl\edit.rs
-Location: Line 74, Column 21
-Label: method not found in `&Fs<Wry<EventLoopMessage>>`
-Code Context:     app_handle.fs().write_text_file(path_obj, content).await
-Full Rendered Output:
-error[E0599]: no method named `write_text_file` found for reference `&tauri_plugin_fs::Fs<tauri_runtime_wry::Wry<EventLoopMessage>>` in the current scope
-  --> src-tauri\src\mcp\tool_impl\edit.rs:74:21
-   |
-74 |     app_handle.fs().write_text_file(path_obj, content).await
-   |                     ^^^^^^^^^^^^^^^ method not found in `&Fs<Wry<EventLoopMessage>>`
-
-
-
-
---- Message 28 ---
-Level: error
-Message: mismatched types
-File: src-tauri\src\mcp\schemas.rs
-Location: Line 47, Column 50
-Label: expected `Vec<String>`, found `Option<_>`
-Code Context:         required: if required_props.is_empty() { None } else { Some(required_props) },
-  note: expected struct `Vec<std::string::String>`
-     found enum `std::option::Option<_>`
-Full Rendered Output:
-error[E0308]: mismatched types
-  --> src-tauri\src\mcp\schemas.rs:47:50
-   |
-47 |         required: if required_props.is_empty() { None } else { Some(required_props) },
-   |                                                  ^^^^ expected `Vec<String>`, found `Option<_>`
-   |
-   = note: expected struct `Vec<std::string::String>`
-                found enum `std::option::Option<_>`
-
-
-
-
---- Message 29 ---
-Level: error
-Message: mismatched types
-File: src-tauri\src\mcp\schemas.rs
-Location: Line 47, Column 64
-Label: expected `Vec<String>`, found `Option<Vec<String>>`
-Code Context:         required: if required_props.is_empty() { None } else { Some(required_props) },
-  note: expected struct `Vec<_>`
-     found enum `std::option::Option<Vec<_>>`
-Full Rendered Output:
-error[E0308]: mismatched types
-  --> src-tauri\src\mcp\schemas.rs:47:64
-   |
-47 |         required: if required_props.is_empty() { None } else { Some(required_props) },
-   |                                                                ^^^^^^^^^^^^^^^^^^^^ expected `Vec<String>`, found `Option<Vec<String>>`
-   |
-   = note: expected struct `Vec<_>`
-                found enum `std::option::Option<Vec<_>>`
-
-
-
-
---- Message 30 ---
-Level: error
-Message: struct `ToolInputSchema` has no field named `meta`
-File: src-tauri\src\mcp\schemas.rs
-Location: Line 49, Column 9
-Label: `ToolInputSchema` does not have this field
-Code Context:         meta: None,
-  note: all struct fields are already assigned
-Full Rendered Output:
-error[E0560]: struct `ToolInputSchema` has no field named `meta`
-  --> src-tauri\src\mcp\schemas.rs:49:9
-   |
-49 |         meta: None,
-   |         ^^^^ `ToolInputSchema` does not have this field
-   |
-   = note: all struct fields are already assigned
-
-
-
-
---- Message 31 ---
-Level: error
-Message: expected a `Fn(&tracing::log::Metadata<'_>)` closure, found `EnvFilter`
+Message: no method named `with_level` found for struct `tauri_plugin_log::Target` in the current scope
 File: src-tauri\src\lib.rs
-Location: Line 53, Column 17
-Label: expected an `Fn(&tracing::log::Metadata<'_>)` closure, found `EnvFilter`
-Code Context:         .filter(EnvFilter::new(format!("mcp_rg_editor_tauri_lib={}", level))), // Corrected method name
-  help: the trait `for<'a, 'b> Fn(&'a tracing::log::Metadata<'b>)` is not implemented for `EnvFilter`
-  note: required by a bound in `tauri_plugin_log::Target::filter`
+Location: Line 62, Column 9
+Code Context:         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview)
 Full Rendered Output:
-error[E0277]: expected a `Fn(&tracing::log::Metadata<'_>)` closure, found `EnvFilter`
-   --> src-tauri\src\lib.rs:53:17
-    |
-53  |         .filter(EnvFilter::new(format!("mcp_rg_editor_tauri_lib={}", level))), // Corrected method name
-    |          ------ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected an `Fn(&tracing::log::Metadata<'_>)` closure, found `EnvFilter`
-    |          |
-    |          required by a bound introduced by this call
-    |
-    = help: the trait `for<'a, 'b> Fn(&'a tracing::log::Metadata<'b>)` is not implemented for `EnvFilter`
-note: required by a bound in `tauri_plugin_log::Target::filter`
-   --> C:\Users\Steve Business\.cargo\git\checkouts\plugins-workspace-bac95421cc662c04\764e8f7\plugins\log\src\lib.rs:197:12
-    |
-195 |     pub fn filter<F>(mut self, filter: F) -> Self
-    |            ------ required by a bound in this associated function
-196 |     where
-197 |         F: Fn(&log::Metadata) -> bool + Send + Sync + 'static,
-    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Target::filter`
-
-
-
-
---- Message 32 ---
-Level: error
-Message: expected a `Fn(&tracing::log::Metadata<'_>)` closure, found `EnvFilter`
-File: src-tauri\src\lib.rs
-Location: Line 55, Column 21
-Label: expected an `Fn(&tracing::log::Metadata<'_>)` closure, found `EnvFilter`
-Code Context:             .filter(EnvFilter::new(format!("mcp_rg_editor_tauri_lib={}", Level::INFO))), // Corrected method name
-  help: the trait `for<'a, 'b> Fn(&'a tracing::log::Metadata<'b>)` is not implemented for `EnvFilter`
-  note: required by a bound in `tauri_plugin_log::Target::filter`
-Full Rendered Output:
-error[E0277]: expected a `Fn(&tracing::log::Metadata<'_>)` closure, found `EnvFilter`
-   --> src-tauri\src\lib.rs:55:21
-    |
-55  |             .filter(EnvFilter::new(format!("mcp_rg_editor_tauri_lib={}", Level::INFO))), // Corrected method ...
-    |              ------ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected an `Fn(&tracing::log::Metadata<'_>)` closure, found `EnvFilter`
-    |              |
-    |              required by a bound introduced by this call
-    |
-    = help: the trait `for<'a, 'b> Fn(&'a tracing::log::Metadata<'b>)` is not implemented for `EnvFilter`
-note: required by a bound in `tauri_plugin_log::Target::filter`
-   --> C:\Users\Steve Business\.cargo\git\checkouts\plugins-workspace-bac95421cc662c04\764e8f7\plugins\log\src\lib.rs:197:12
-    |
-195 |     pub fn filter<F>(mut self, filter: F) -> Self
-    |            ------ required by a bound in this associated function
-196 |     where
-197 |         F: Fn(&log::Metadata) -> bool + Send + Sync + 'static,
-    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `Target::filter`
-
-
-
-
---- Message 33 ---
-Level: error
-Message: mismatched types
-File: src-tauri\src\lib.rs
-Location: Line 65, Column 33
-Label: expected `LevelFilter`, found `Level`
-Code Context:             .level_for("hyper", tracing::Level::WARN) // Corrected to tracing::Level
-  note: method defined here
-Full Rendered Output:
-error[E0308]: mismatched types
-   --> src-tauri\src\lib.rs:65:33
-    |
-65  |             .level_for("hyper", tracing::Level::WARN) // Corrected to tracing::Level
-    |              ---------          ^^^^^^^^^^^^^^^^^^^^ expected `LevelFilter`, found `Level`
-    |              |
-    |              arguments to this method are incorrect
-    |
-note: method defined here
-   --> C:\Users\Steve Business\.cargo\git\checkouts\plugins-workspace-bac95421cc662c04\764e8f7\plugins\log\src\lib.rs:350:12
-    |
-350 |     pub fn level_for(mut self, module: impl Into<Cow<'static, str>>, level: LevelFilter) -> Self {
-    |            ^^^^^^^^^
-
-
-
-
---- Message 34 ---
-Level: error
-Message: mismatched types
-File: src-tauri\src\lib.rs
-Location: Line 66, Column 34
-Label: expected `LevelFilter`, found `Level`
-Code Context:             .level_for("rustls", tracing::Level::WARN) // Corrected to tracing::Level
-  note: method defined here
-Full Rendered Output:
-error[E0308]: mismatched types
-   --> src-tauri\src\lib.rs:66:34
-    |
-66  |             .level_for("rustls", tracing::Level::WARN) // Corrected to tracing::Level
-    |              ---------           ^^^^^^^^^^^^^^^^^^^^ expected `LevelFilter`, found `Level`
-    |              |
-    |              arguments to this method are incorrect
-    |
-note: method defined here
-   --> C:\Users\Steve Business\.cargo\git\checkouts\plugins-workspace-bac95421cc662c04\764e8f7\plugins\log\src\lib.rs:350:12
-    |
-350 |     pub fn level_for(mut self, module: impl Into<Cow<'static, str>>, level: LevelFilter) -> Self {
-    |            ^^^^^^^^^
-
-
-
-
---- Message 35 ---
-Level: warning
-Message: unused import: `Layer`
-File: src-tauri\src\lib.rs
-Location: Line 15, Column 114
-Code Context: use tracing_subscriber::{filter::EnvFilter, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, Layer as TracingLayerExt}; // Renamed Layer to avoid conflict
-Full Rendered Output:
-warning: unused import: `Layer`
-  --> src-tauri\src\lib.rs:15:114
+error[E0599]: no method named `with_level` found for struct `tauri_plugin_log::Target` in the current scope
+  --> src-tauri\src\lib.rs:63:14
    |
-15 | ...an, layer::SubscriberExt, util::SubscriberInitExt, Layer as TracingLayerExt}; // Renamed Layer to avoid con...
-   |                                                       ^^^^^
-
-
-
-
---- Message 36 ---
-Level: failure-note
-Message: Some errors have detailed explanations: E0277, E0308, E0432, E0560, E0599.
-Full Rendered Output:
-Some errors have detailed explanations: E0277, E0308, E0432, E0560, E0599.
-
-
-
---- Message 37 ---
-Level: failure-note
-Message: For more information about an error, try `rustc --explain E0277`.
-Full Rendered Output:
-For more information about an error, try `rustc --explain E0277`.
-
-
-
+62 | /         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview)
+63 | |             .with_level(log::LevelFilter::Info), // Example: Webview might have a different default
+   | |             -^^^^^^^^^^ method not found in `Target`
+   | |_____________|
+   |
