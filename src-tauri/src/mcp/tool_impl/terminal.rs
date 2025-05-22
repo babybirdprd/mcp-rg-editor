@@ -61,7 +61,7 @@ fn is_command_blocked_mcp(command_str: &str, config: &Config) -> bool {
 #[instrument(skip(deps, params), fields(command = %params.command))]
 pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommandParamsMCP) -> Result<ExecuteCommandResultMCP, AppError> {
     let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-    if is_command_blocked_mcp(¶ms.command, &config_guard) {
+    if is_command_blocked_mcp(params.command, &config_guard) {
         return Err(AppError::CommandBlocked(params.command.clone()));
     }
     let cwd_path = config_guard.files_root.clone();

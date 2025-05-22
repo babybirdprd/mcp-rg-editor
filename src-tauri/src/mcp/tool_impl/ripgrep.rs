@@ -93,7 +93,7 @@ pub async fn mcp_search_code(
     if params.case_sensitive { rg_args.push("-s".to_string()); }
     else if params.ignore_case { rg_args.push("-i".to_string()); }
     if let Some(context) = params.context_lines { if context > 0 { rg_args.push("-C".to_string()); rg_args.push(context.to_string()); }}
-    if let Some(glob) = ¶ms.file_pattern { if !glob.is_empty() { rg_args.push("-g".to_string()); rg_args.push(glob.clone()); }}
+    if let Some(glob) = params.file_pattern { if !glob.is_empty() { rg_args.push("-g".to_string()); rg_args.push(glob.clone()); }}
     if let Some(depth) = params.max_depth { rg_args.push("--max-depth".to_string()); rg_args.push(depth.to_string()); }
     rg_args.push("--max-count".to_string()); rg_args.push(params.max_results.to_string());
     if params.include_hidden { rg_args.push("--hidden".to_string()); }

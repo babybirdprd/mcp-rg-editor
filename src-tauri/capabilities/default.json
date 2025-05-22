@@ -1,40 +1,40 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
+  "identifier": "core:default",
   "description": "Default permissions for MCP-RG-Editor Tauri",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "path:default",
-    "event:default",
-    "window:default",
-    "app:default",
-    "resources:default",
-    "menu:default",
-    "tray:default",
+    "core:path:default",
+    "core:event:default",
+    "core:window:default",
+    "core:app:default",
+    "core:resources:default",
+    "core:menu:default",
+    "core:tray:default",
     "shell:default",
     "shell:allow-open",
     {
       "identifier": "shell:allow-execute",
       "allow": [
-        { "name": "rg", "cmd": "rg", "args": true, "sidecar": false },
-        { "name": "sh", "cmd": "sh", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
-        { "name": "bash", "cmd": "bash", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
-        { "name": "powershell", "cmd": "powershell", "args": ["-Command", { "validator": "\\S+" }], "sidecar": false },
-        { "name": "cmd", "cmd": "cmd", "args": ["/C", { "validator": "\\S+" }], "sidecar": false }
+        { "name": "rg", "cmd": "rg", "args": true },
+        { "name": "sh", "cmd": "sh", "args": ["-c", { "validator": "\\S+" }] },
+        { "name": "bash", "cmd": "bash", "args": ["-c", { "validator": "\\S+" }] },
+        { "name": "powershell", "cmd": "powershell", "args": ["-Command", { "validator": "\\S+" }] },
+        { "name": "cmd", "cmd": "cmd", "args": ["/C", { "validator": "\\S+" }] }
       ]
     },
     "fs:default",
     "fs:allow-app-read",
     "fs:allow-app-write",
-    "fs:allow-app-data-read",
-    "fs:allow-app-data-write",
-    "fs:allow-app-log-read",
-    "fs:allow-app-log-write",
-    "fs:allow-app-config-read",
-    "fs:allow-app-config-write",
-    "fs:allow-app-cache-read",
-    "fs:allow-app-cache-write",
+    "fs:allow-appdata-read",
+    "fs:allow-appdata-write",
+    "fs:allow-applog-read",
+    "fs:allow-applog-write",
+    "fs:allow-appconfig-read",
+    "fs:allow-appconfig-write",
+    "fs:allow-appcache-read",
+    "fs:allow-appcache-write",
     "fs:allow-desktop-read",
     "fs:allow-desktop-write",
     "fs:allow-document-read",
@@ -66,11 +66,11 @@
     "shell": {
       "execute": {
         "allow": [
-          { "name": "rg", "cmd": "rg", "args": true, "sidecar": false },
-          { "name": "sh", "cmd": "sh", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
-          { "name": "bash", "cmd": "bash", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
-          { "name": "powershell", "cmd": "powershell", "args": ["-Command", { "validator": "\\S+" }], "sidecar": false },
-          { "name": "cmd", "cmd": "cmd", "args": ["/C", { "validator": "\\S+" }], "sidecar": false }
+          { "name": "rg", "cmd": "rg", "args": true },
+          { "name": "sh", "cmd": "sh", "args": ["-c", { "validator": "\\S+" }] },
+          { "name": "bash", "cmd": "bash", "args": ["-c", { "validator": "\\S+" }] },
+          { "name": "powershell", "cmd": "powershell", "args": ["-Command", { "validator": "\\S+" }] },
+          { "name": "cmd", "cmd": "cmd", "args": ["/C", { "validator": "\\S+" }] }
         ]
       }
     }

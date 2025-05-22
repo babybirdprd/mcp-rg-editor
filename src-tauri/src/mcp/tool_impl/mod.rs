@@ -5,6 +5,6 @@
 
 pub mod filesystem;
 pub mod ripgrep;
-// pub mod terminal; // Add later
-// pub mod process;  // Add later
-// pub mod edit;     // Add later
+pub mod terminal;
+pub mod process; 
+pub mod edit;

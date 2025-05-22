@@ -2,10 +2,10 @@
 // IMPORTANT NOTE: Rewrite the entire file.
 "use client"; // Required for client-side hooks and context
 
-import { Geist_Sans } from "geist/font/sans";
-import { Geist_Mono } from "geist/font/mono";
+const Geist_Sans = { variable: "font-sans" };
+const Geist_Mono = { variable: "font-mono" };
 import "@/styles/globals.css";
-import { Toaster } from "@/components/ui/toaster"; // Assuming Shadcn UI Toaster
+import { Toaster } from "@/components/ui/sonner"; // Assuming Shadcn UI Toaster
 
 export default function RootLayout({
   children,

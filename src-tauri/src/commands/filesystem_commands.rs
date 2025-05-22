@@ -214,7 +214,7 @@ pub async fn read_file_command(
     audit_logger_state: State<'_, Arc<crate::utils::audit_logger::AuditLogger>>,
     params: ReadFileParams,
 ) -> Result<FileContent, AppError> {
-    audit_log(&audit_logger_state, "read_file", &serde_json::to_value(¶ms)?).await;
+    audit_log(&audit_logger_state, "read_file", &serde_json::to_value(params)?).await;
     let config_guard = config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock error: {}",e)))?;
 
     if params.is_url {
@@ -222,10 +222,10 @@ pub async fn read_file_command(
         // Consider using app_handle.http().fetch() if http plugin is configured for this URL's scope
         // For now, using reqwest directly as it was in the original code.
         let client = reqwest::Client::new();
-        return read_file_from_url_internal(&client, ¶ms.path, &app_handle).await;
+        return read_file_from_url_internal(&client, params.path, &app_handle).await;
     }
 
-    let path = validate_and_normalize_path(¶ms.path, &config_guard, true, false)?;
+    let path = validate_and_normalize_path(params.path, &config_guard, true, false)?;
     debug!(local_path = %path.display(), "Reading file from disk via tauri-plugin-fs");
 
     if !app_handle.fs_scope().is_allowed(&path) {
@@ -283,13 +283,13 @@ pub async fn read_multiple_files_command(
     audit_logger_state: State<'_, Arc<crate::utils::audit_logger::AuditLogger>>,
     params: ReadMultipleFilesParams,
 ) -> Result<ReadMultipleFilesResult, AppError> {
-    audit_log(&audit_logger_state, "read_multiple_files", &serde_json::to_value(¶ms)?).await;
+    audit_log(&audit_logger_state, "read_multiple_files", &serde_json::to_value(params)?).await;
     let config_guard = config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock error: {}",e)))?;
 
     let mut results = Vec::new();
     let http_client = reqwest::Client::new(); // Create one client for all URL reads
 
-    for path_str_from_params in ¶ms.paths { // Iterate over borrowed strings
+    for path_str_from_params in params.paths { // Iterate over borrowed strings
         let path_str = path_str_from_params.clone(); // Clone for ownership in ReadFileParams
         let is_url = path_str.starts_with("http://") || path_str.starts_with("https://");
 
@@ -363,10 +363,10 @@ pub async fn write_file_command(
     audit_logger_state: State<'_, Arc<crate::utils::audit_logger::AuditLogger>>,
     params: WriteFileParams,
 ) -> Result<FileOperationResult, AppError> {
-    audit_log(&audit_logger_state, "write_file", &serde_json::to_value(¶ms)?).await;
+    audit_log(&audit_logger_state, "write_file", &serde_json::to_value(params)?).await;
     let config_guard = config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock error: {}",e)))?;
 
-    let path = validate_and_normalize_path(¶ms.path, &config_guard, false, true)?;
+    let path = validate_and_normalize_path(params.path, &config_guard, false, true)?;
     debug!(write_path = %path.display(), mode = ?params.mode, "Writing file via tauri-plugin-fs");
 
     let lines: Vec<&str> = params.content.lines().collect();
@@ -377,10 +377,10 @@ pub async fn write_file_command(
     let final_content = if params.mode == WriteMode::Append && app_handle.fs().exists(&path).await.unwrap_or(false) {
         let existing_content_str = app_handle.fs().read_text_file(&path).await.unwrap_or_default();
         let detected_ending = detect_line_ending(&existing_content_str);
-        normalize_line_endings(¶ms.content, detected_ending)
+        normalize_line_endings(params.content, detected_ending)
     } else {
         let system_ending = if cfg!(windows) { LineEndingStyle::CrLf } else { LineEndingStyle::Lf };
-        normalize_line_endings(¶ms.content, system_ending)
+        normalize_line_endings(params.content, system_ending)
     };
     drop(config_guard);
 
@@ -398,11 +398,11 @@ pub async fn write_file_command(
                 current_content = app_handle.fs().read_text_file(&path).await.unwrap_or_default();
             }
             if !current_content.is_empty() && !current_content.ends_with('\n') && !current_content.ends_with("\r\n") {
-                let detected_ending = detect_line_ending(¤t_content);
+                let detected_ending = detect_line_ending(current_content);
                 current_content.push_str(detected_ending.as_str());
             }
             current_content.push_str(&final_content);
-            app_handle.fs().write_text_file(&path, ¤t_content).await.map_err(|e| AppError::PluginError{ plugin: "fs".to_string(), message: e.to_string()})?;
+            app_handle.fs().write_text_file(&path, current_content).await.map_err(|e| AppError::PluginError{ plugin: "fs".to_string(), message: e.to_string()})?;
         }
     }
     Ok(FileOperationResult { success: true, path: params.path.clone(), message: format!("Successfully {} content to file.", if params.mode == WriteMode::Append {"appended"} else {"wrote"})})
@@ -416,9 +416,9 @@ pub async fn create_directory_command(
     audit_logger_state: State<'_, Arc<crate::utils::audit_logger::AuditLogger>>,
     params: CreateDirectoryParams,
 ) -> Result<FileOperationResult, AppError> {
-    audit_log(&audit_logger_state, "create_directory", &serde_json::to_value(¶ms)?).await;
+    audit_log(&audit_logger_state, "create_directory", &serde_json::to_value(params)?).await;
     let config_guard = config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock error: {}",e)))?;
-    let path = validate_and_normalize_path(¶ms.path, &config_guard, false, true)?;
+    let path = validate_and_normalize_path(params.path, &config_guard, false, true)?;
     drop(config_guard);
     debug!(create_dir_path = %path.display(), "Creating directory via tauri-plugin-fs");
 
@@ -437,9 +437,9 @@ pub async fn list_directory_command(
     audit_logger_state: State<'_, Arc<crate::utils::audit_logger::AuditLogger>>,
     params: ListDirectoryParams,
 ) -> Result<ListDirectoryResult, AppError> {
-    audit_log(&audit_logger_state, "list_directory", &serde_json::to_value(¶ms)?).await;
+    audit_log(&audit_logger_state, "list_directory", &serde_json::to_value(params)?).await;
     let config_guard = config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock error: {}",e)))?;
-    let path = validate_and_normalize_path(¶ms.path, &config_guard, true, false)?;
+    let path = validate_and_normalize_path(params.path, &config_guard, true, false)?;
     drop(config_guard);
     debug!(list_dir_path = %path.display(), "Listing directory via tauri-plugin-fs");
 
@@ -465,10 +465,10 @@ pub async fn move_file_command(
     audit_logger_state: State<'_, Arc<crate::utils::audit_logger::AuditLogger>>,
     params: MoveFileParams,
 ) -> Result<FileOperationResult, AppError> {
-    audit_log(&audit_logger_state, "move_file", &serde_json::to_value(¶ms)?).await;
+    audit_log(&audit_logger_state, "move_file", &serde_json::to_value(params)?).await;
     let config_guard = config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock error: {}",e)))?;
-    let source_path = validate_and_normalize_path(¶ms.source, &config_guard, true, false)?;
-    let dest_path = validate_and_normalize_path(¶ms.destination, &config_guard, false, true)?;
+    let source_path = validate_and_normalize_path(params.source, &config_guard, true, false)?;
+    let dest_path = validate_and_normalize_path(params.destination, &config_guard, false, true)?;
     drop(config_guard);
     debug!(move_source = %source_path.display(), move_dest = %dest_path.display(), "Moving file/directory via tauri-plugin-fs");
 
@@ -487,9 +487,9 @@ pub async fn get_file_info_command(
     audit_logger_state: State<'_, Arc<crate::utils::audit_logger::AuditLogger>>,
     params: GetFileInfoParams,
 ) -> Result<FileInfoResult, AppError> {
-    audit_log(&audit_logger_state, "get_file_info", &serde_json::to_value(¶ms)?).await;
+    audit_log(&audit_logger_state, "get_file_info", &serde_json::to_value(params)?).await;
     let config_guard = config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock error: {}",e)))?;
-    let path = validate_and_normalize_path(¶ms.path, &config_guard, true, false)?;
+    let path = validate_and_normalize_path(params.path, &config_guard, true, false)?;
     drop(config_guard);
     debug!(info_path = %path.display(), "Getting file info via tauri-plugin-fs");
 
@@ -568,10 +568,10 @@ pub async fn search_files_command(
     audit_logger_state: State<'_, Arc<crate::utils::audit_logger::AuditLogger>>,
     params: SearchFilesParams,
 ) -> Result<SearchFilesResult, AppError> {
-    audit_log(&audit_logger_state, "search_files", &serde_json::to_value(¶ms)?).await;
+    audit_log(&audit_logger_state, "search_files", &serde_json::to_value(params)?).await;
     let config_guard = config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock error: {}",e)))?;
 
-    let root_search_path = validate_and_normalize_path(¶ms.path, &config_guard, true, false)?;
+    let root_search_path = validate_and_normalize_path(params.path, &config_guard, true, false)?;
     let files_root_clone = config_guard.files_root.clone();
     debug!(search_root = %root_search_path.display(), pattern = %params.pattern, "Searching files by name (recursive with tauri-plugin-fs)");
 

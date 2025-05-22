@@ -84,11 +84,11 @@ pub async fn mcp_edit_block(
 
     let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
     let (original_content, validated_path, file_line_ending) =
-        read_file_for_edit_mcp(&deps.app_handle, ¶ms.file_path, &config_guard).await?;
+        read_file_for_edit_mcp(&deps.app_handle, params.file_path.as_str(), &config_guard).await?;
     let file_ext = validated_path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
 
-    let norm_old = normalize_line_endings(¶ms.old_string, file_line_ending);
-    let norm_new = normalize_line_endings(¶ms.new_string, file_line_ending);
+    let norm_old = normalize_line_endings(params.old_string.as_str(), file_line_ending);
+    let norm_new = normalize_line_endings(params.new_string.as_str(), file_line_ending);
     let occurrences: Vec<_> = original_content.match_indices(&norm_old).collect();
     let actual_occurrences = occurrences.len();
 

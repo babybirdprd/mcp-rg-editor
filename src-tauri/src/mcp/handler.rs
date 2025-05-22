@@ -130,7 +130,7 @@ impl ServerHandler for EnhancedServerHandler {
                 let config_guard = self.deps.config_state.read().map_err(|e| CallToolError::new(RpcError::internal_error(Some(format!("Config lock error: {}", e)))))?;
                 let current_config_data = config_guard.clone();
                 drop(config_guard);
-                let value_result = serde_json::to_value(¤t_config_data)
+                let value_result = serde_json::to_value(current_config_data)
                     .map_err(|e| CallToolError::new(RpcError::internal_error(Some(format!("Failed to serialize config: {}", e)))))?;
                 create_mcp_json_call_tool_result(value_result)
             }

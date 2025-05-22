@@ -1,0 +1,9 @@
+{
+  "rust-analyzer.cargo.autoreload": true,
+  "rust-analyzer.cargo.features": "all",
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.linkedProjects": [
+    "src-tauri/Cargo.toml"
+  ],
+  "rust-analyzer.diagnostics.enable": true
+}
