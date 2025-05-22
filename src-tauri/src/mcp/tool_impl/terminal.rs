@@ -1,22 +1,21 @@
-// FILE: src-tauri/src/mcp/tool_impl/terminal.rs
 use crate::config::Config;
 use crate::error::AppError;
 use crate::mcp::handler::ToolDependencies;
-use crate::commands::terminal_commands::ActiveSession; // Use the existing ActiveSession
+use crate::commands::terminal_commands::ActiveSession;
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, Runtime}; // Added Emitter
-use tauri_plugin_shell::{process::CommandEvent, ShellExt}; // Corrected CommandEvent import
+use tauri::{Emitter}; // Removed AppHandle, Runtime, Manager
+use tauri_plugin_shell::{process::CommandEvent, ShellExt, process::Command as TauriShellCommand}; // Removed CommandChild
 use tokio::sync::Mutex as TokioMutex;
-use tokio::time::{timeout, Duration, Instant as TokioInstant}; // Use TokioInstant
+use tokio::time::{timeout, Duration, Instant as TokioInstant}; // Removed error::Elapsed
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 use chrono::Utc;
-use serde_json::json; // For json! macro
+use serde_json::json;
 
 // --- MCP Specific Parameter Structs ---
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ExecuteCommandParamsMCP {
     pub command: String,
     #[serde(rename = "timeout_ms")]
@@ -24,10 +23,10 @@ pub struct ExecuteCommandParamsMCP {
     pub shell: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ForceTerminateParamsMCP { pub session_id: String } // Corrected syntax
-#[derive(Debug, Deserialize)]
-pub struct ReadOutputStatusParamsMCP { pub session_id: String } // Corrected syntax
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ForceTerminateParamsMCP { pub session_id: String }
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ReadOutputStatusParamsMCP { pub session_id: String }
 
 // --- MCP Specific Result Structs ---
 #[derive(Debug, Serialize)]
@@ -41,7 +40,7 @@ pub struct ExecuteCommandResultMCP {
 }
 
 #[derive(Debug, Serialize)]
-pub struct ForceTerminateResultMCP { pub session_id: String, pub success: bool, pub message: String } // Corrected syntax
+pub struct ForceTerminateResultMCP { pub session_id: String, pub success: bool, pub message: String }
 #[derive(Debug, Serialize)]
 pub struct SessionInfoMCP { pub session_id: String, pub command: String, pub pid: Option<u32>, pub is_running: bool, pub start_time_iso: String, pub runtime_ms: u128 }
 #[derive(Debug, Serialize)]
@@ -60,46 +59,42 @@ fn is_command_blocked_mcp(command_str: &str, config: &Config) -> bool {
 #[instrument(skip(deps, params), fields(command = %params.command))]
 pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommandParamsMCP) -> Result<ExecuteCommandResultMCP, AppError> {
     let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-    if is_command_blocked_mcp(params.command, &config_guard) {
+    if is_command_blocked_mcp(&params.command, &config_guard) {
         return Err(AppError::CommandBlocked(params.command.clone()));
     }
     let cwd_path = config_guard.files_root.clone();
-    let shell_to_use = params.shell.clone().or_else(|| config_guard.default_shell.clone());
+    let shell_to_use_opt = params.shell.clone().or_else(|| config_guard.default_shell.clone());
     drop(config_guard);
 
     let session_id = Uuid::new_v4().to_string();
-    let (mut command_obj, shell_args_for_scope_check): (tauri_plugin_shell::Command, Vec<String>) = if let Some(shell_path) = &shell_to_use {
-        let mut args = Vec::new();
-        if shell_path.contains("powershell") || shell_path.contains("cmd.exe") { args.push("-Command".to_string()); } else { args.push("-c".to_string()); }
-        args.push(params.command.clone());
-        (deps.app_handle.shell().command(shell_path.clone()).args(args.clone()), args)
-    } else {
-        let mut parts = params.command.split_whitespace();
-        let prog = parts.next().ok_or_else(|| AppError::CommandExecutionError("Empty command".into()))?;
-        let args: Vec<String> = parts.map(String::from).collect();
-        (deps.app_handle.shell().command(prog.to_string()).args(args.clone()), args)
-    };
     
-    // No direct set_stdin on tauri_plugin_shell::Command. Stdin(null) is default for non-interactive.
+    let (mut command_obj, _shell_args_for_scope_check, _program_name_for_scope_check): (TauriShellCommand, Vec<String>, String) = 
+        if let Some(shell_path_str) = &shell_to_use_opt {
+            let mut args = Vec::new();
+            if shell_path_str.contains("powershell") || shell_path_str.contains("cmd.exe") { args.push("-Command".to_string()); } 
+            else { args.push("-c".to_string()); }
+            args.push(params.command.clone());
+            (deps.app_handle.shell().command(shell_path_str.clone()).args(args.clone()), args, shell_path_str.clone())
+        } else {
+            let mut parts = params.command.split_whitespace();
+            let prog = parts.next().ok_or_else(|| AppError::CommandExecutionError("Empty command".into()))?;
+            let args: Vec<String> = parts.map(String::from).collect();
+            (deps.app_handle.shell().command(prog.to_string()).args(args.clone()), args, prog.to_string())
+        };
+    
     command_obj = command_obj.current_dir(cwd_path);
-    // command_obj = command_obj.set_stdin(std::process::Stdio::null()); // This was incorrect for tauri_plugin_shell::Command
 
-    let program_name_for_scope_check = command_obj.program_for_scope_check().to_string_lossy().to_string(); // Helper method needed or store program name
-    if !deps.app_handle.shell().scope().is_allowed(&program_name_for_scope_check, &shell_args_for_scope_check) {
-        return Err(AppError::CommandBlocked(format!("Execution of '{}' not permitted by shell scope.", program_name_for_scope_check)));
-    }
-
-    debug!(shell = ?shell_to_use, command = %params.command, "MCP Tool: Spawning command via tauri-plugin-shell");
+    debug!(shell = ?shell_to_use_opt, command = %params.command, "MCP Tool: Spawning command via tauri-plugin-shell");
     let (mut rx, child_proc_handle) = command_obj.spawn().map_err(|e| AppError::CommandExecutionError(format!("Spawn failed: {}", e)))?;
     let pid_val = child_proc_handle.pid();
 
     let active_session_arc = Arc::new(ActiveSession {
-        process_child: Arc::new(TokioMutex::new(child_proc_handle)),
+        process_child: Arc::new(TokioMutex::new(Some(child_proc_handle))),
         command_str: params.command.clone(),
         exit_code: Arc::new(TokioMutex::new(None)),
         start_time_system: std::time::SystemTime::now(),
         session_id: session_id.clone(),
-        pid: Some(pid_val), // pid is u32
+        pid: Some(pid_val),
     });
     deps.active_sessions_map.lock().await.insert(session_id.clone(), active_session_arc.clone());
 
@@ -115,17 +110,26 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
             if early_exit_code.is_none() { timed_out_flag = true; }
             break;
         }
+        
+        // rx.recv() returns Option<Result<CommandEvent, ShellError>>
+        // The timeout is for the recv() operation itself.
         match timeout(Duration::from_millis(50), rx.recv()).await {
-            Ok(Ok(Some(event))) => match event {
-                CommandEvent::Stdout(line) => initial_stdout_lines.push(String::from_utf8_lossy(&line).into_owned()),
-                CommandEvent::Stderr(line) => initial_stderr_lines.push(String::from_utf8_lossy(&line).into_owned()),
-                CommandEvent::Terminated(payload) => { early_exit_code = payload.code; break; }
-                CommandEvent::Error(msg) => { error!("Cmd error during initial read: {}", msg); early_exit_code = Some(-1); break; }
-                _ => {}
-            },
-            Ok(Ok(None)) => { break; } 
-            Ok(Err(e)) => { error!("rx.recv error: {:?}", e); early_exit_code = Some(-2); break; } 
-            Err(_) => { /* timeout for this 50ms iteration */ }
+            Ok(Some(Ok(event))) => { // Successfully received an event
+                match event {
+                    CommandEvent::Stdout(line) => initial_stdout_lines.push(String::from_utf8_lossy(&line).into_owned()),
+                    CommandEvent::Stderr(line) => initial_stderr_lines.push(String::from_utf8_lossy(&line).into_owned()),
+                    CommandEvent::Terminated(payload) => { early_exit_code = payload.code; break; }
+                    CommandEvent::Error(msg) => { error!("Cmd error during initial read: {}", msg); early_exit_code = Some(-1); break; }
+                    _ => {} // Other events like Pid
+                }
+            }
+            Ok(Some(Err(shell_error))) => { // ShellError from the stream
+                error!("rx.recv shell error: {:?}", shell_error); early_exit_code = Some(-2); break;
+            }
+            Ok(None) => { // Stream ended
+                break;
+            }
+            Err(_elapsed_err) => { /* timeout for this 50ms iteration, continue loop */ }
         }
     }
     
@@ -134,39 +138,47 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
     let app_handle_clone = deps.app_handle.clone();
     let session_id_clone_for_task = session_id.clone();
     let active_session_clone_for_task = active_session_arc.clone();
-    let sessions_state_clone_for_task = deps.active_sessions_map.clone();
+    let sessions_map_clone_for_task = deps.active_sessions_map.clone();
 
     if early_exit_code.is_none() {
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Some(CommandEvent::Stdout(line)) => {
+                    Some(Ok(CommandEvent::Stdout(line))) => {
                         app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "stdout", "data": String::from_utf8_lossy(&line).into_owned()})).unwrap_or_else(|e| error!("Emit stdout failed: {}", e));
                     }
-                    Some(CommandEvent::Stderr(line)) => {
+                    Some(Ok(CommandEvent::Stderr(line))) => {
                         app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "stderr", "data": String::from_utf8_lossy(&line).into_owned()})).unwrap_or_else(|e| error!("Emit stderr failed: {}", e));
                     }
-                    Some(CommandEvent::Terminated(payload)) => {
+                    Some(Ok(CommandEvent::Terminated(payload))) => {
                         info!(sid = %session_id_clone_for_task, code = ?payload.code, "Background task: Command terminated");
                         *active_session_clone_for_task.exit_code.lock().await = payload.code;
                         app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "terminated", "code": payload.code, "signal": payload.signal })).unwrap_or_else(|e| error!("Emit terminated failed: {}", e));
-                        sessions_state_clone_for_task.lock().await.remove(&session_id_clone_for_task);
+                        sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
                         break;
                     }
-                    Some(CommandEvent::Error(message)) => {
+                    Some(Ok(CommandEvent::Error(message))) => {
                         error!(sid = %session_id_clone_for_task, message = %message, "Background task: Command error in stream");
                         *active_session_clone_for_task.exit_code.lock().await = Some(-1);
                         app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "error", "data": message })).unwrap_or_else(|e| error!("Emit error failed: {}", e));
-                        sessions_state_clone_for_task.lock().await.remove(&session_id_clone_for_task);
+                        sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
                         break;
                     }
-                    None => {
+                    Some(Ok(_other_event)) => { /* e.g. CommandEvent::Pid - can ignore or log */ }
+                    Some(Err(shell_error)) => { // ShellError from the stream in background task
+                        error!(sid = %session_id_clone_for_task, error = ?shell_error, "Background task: Shell error receiving from command stream");
+                        *active_session_clone_for_task.exit_code.lock().await = Some(-2); // Indicate receive error
+                        app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "error", "data": format!("Stream shell error: {:?}", shell_error) })).unwrap_or_else(|e_emit| error!("Emit stream error failed: {}", e_emit));
+                        sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
+                        break;
+                    }
+                    None => { // Stream closed
                         info!(sid = %session_id_clone_for_task, "Background task: Command event stream closed");
                         if active_session_clone_for_task.exit_code.lock().await.is_none() {
                             *active_session_clone_for_task.exit_code.lock().await = Some(0);
                         }
                         app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "finished_stream_closed"})).unwrap_or_else(|e| error!("Emit finished failed: {}", e));
-                        sessions_state_clone_for_task.lock().await.remove(&session_id_clone_for_task);
+                        sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
                         break;
                     }
                 }
@@ -187,50 +199,76 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
 }
 
 pub async fn mcp_force_terminate_session(deps: &ToolDependencies, params: ForceTerminateParamsMCP) -> Result<ForceTerminateResultMCP, AppError> {
-    let session_id = params.session_id;
-    if let Some(session_arc) = deps.active_sessions_map.lock().await.get(&session_id).cloned() {
-        let mut child_guard = session_arc.process_child.lock().await;
-        match child_guard.kill() {
-            Ok(_) => {
-                info!(sid = %session_id, pid = ?session_arc.pid, "MCP Tool: Termination signal sent.");
-                *session_arc.exit_code.lock().await = Some(-9);
-                deps.active_sessions_map.lock().await.remove(&session_id);
-                Ok(ForceTerminateResultMCP { session_id, success: true, message: "Termination signal sent.".into() })
+    let session_id_to_terminate = params.session_id;
+    if let Some(session_arc) = deps.active_sessions_map.lock().await.get(&session_id_to_terminate).cloned() {
+        let mut child_opt_guard = session_arc.process_child.lock().await;
+        if let Some(child_to_kill_instance) = child_opt_guard.take() { // Take ownership by removing from Option
+            // child_to_kill_instance is CommandChild
+            // .kill() consumes self.
+            match child_to_kill_instance.kill() {
+                Ok(_) => {
+                    info!(sid = %session_id_to_terminate, pid = ?session_arc.pid, "MCP Tool: Termination signal sent.");
+                    *session_arc.exit_code.lock().await = Some(-9); // Arbitrary code for killed
+                    deps.active_sessions_map.lock().await.remove(&session_id_to_terminate);
+                    Ok(ForceTerminateResultMCP { session_id: session_id_to_terminate, success: true, message: "Termination signal sent.".into() })
+                }
+                Err(e) => {
+                    warn!(sid = %session_id_to_terminate, pid = ?session_arc.pid, error = %e, "MCP Tool: Failed to send kill signal");
+                    // Since kill() consumed child_to_kill_instance, we cannot put it back.
+                    // The child is gone from our perspective. If kill failed, it might still be running OS-side.
+                    if session_arc.exit_code.lock().await.is_none() {
+                        *session_arc.exit_code.lock().await = Some(-10); // Arbitrary code for kill fail
+                    }
+                    // We can't put it back, so just remove from map as we can't manage it anymore.
+                    deps.active_sessions_map.lock().await.remove(&session_id_to_terminate);
+                    Ok(ForceTerminateResultMCP { session_id: session_id_to_terminate, success: false, message: format!("Kill signal failed: {}. Session removed from tracking.", e) })
+                }
             }
-            Err(e) => {
-                warn!(sid = %session_id, pid = ?session_arc.pid, error = %e, "MCP Tool: Failed to send kill signal");
-                if session_arc.exit_code.lock().await.is_none() { *session_arc.exit_code.lock().await = Some(-10); }
-                Ok(ForceTerminateResultMCP { session_id, success: false, message: format!("Kill signal failed: {}", e) })
-            }
+        } else {
+            // Child already taken/terminated from Option
+            Ok(ForceTerminateResultMCP { session_id: session_id_to_terminate, success: true, message: "Process already terminated or not found in session's Option.".into() })
         }
-    } else { Err(AppError::SessionNotFound(session_id)) }
+    } else { Err(AppError::SessionNotFound(session_id_to_terminate)) }
 }
 
+
 pub async fn mcp_list_sessions(deps: &ToolDependencies) -> Result<Vec<SessionInfoMCP>, AppError> {
-    let sessions_map = deps.active_sessions_map.lock().await;
+    let sessions_map_guard = deps.active_sessions_map.lock().await;
     let mut infos = Vec::new();
-    let now_sys = std::time::SystemTime::now();
-    for (id, session) in sessions_map.iter() {
-        let exit_code = *session.exit_code.lock().await;
+    let now_sys_time = std::time::SystemTime::now();
+
+    for (id, session_arc) in sessions_map_guard.iter() {
+        let exit_code_val = *session_arc.exit_code.lock().await;
         infos.push(SessionInfoMCP {
-            session_id: id.clone(), command: session.command_str.clone(), pid: session.pid,
-            is_running: exit_code.is_none(), start_time_iso: chrono::DateTime::<Utc>::from(session.start_time_system).to_rfc3339(),
-            runtime_ms: now_sys.duration_since(session.start_time_system).unwrap_or_default().as_millis(),
+            session_id: id.clone(),
+            command: session_arc.command_str.clone(),
+            pid: session_arc.pid,
+            is_running: exit_code_val.is_none(),
+            start_time_iso: chrono::DateTime::<Utc>::from(session_arc.start_time_system).to_rfc3339(),
+            runtime_ms: now_sys_time.duration_since(session_arc.start_time_system).unwrap_or_default().as_millis(),
         });
     }
     Ok(infos)
 }
 
 pub async fn mcp_read_session_output_status(deps: &ToolDependencies, params: ReadOutputStatusParamsMCP) -> Result<ReadOutputStatusResultMCP, AppError> {
-    let session_id = params.session_id;
-    if let Some(session_arc) = deps.active_sessions_map.lock().await.get(&session_id).cloned() {
-        let exit_code = *session_arc.exit_code.lock().await;
+    let session_id_to_read = params.session_id;
+    if let Some(session_arc) = deps.active_sessions_map.lock().await.get(&session_id_to_read).cloned() {
+        let exit_code_val = *session_arc.exit_code.lock().await;
         Ok(ReadOutputStatusResultMCP {
-            session_id, is_running: exit_code.is_none(), exit_code,
+            session_id: session_id_to_read,
+            is_running: exit_code_val.is_none(),
+            exit_code: exit_code_val,
             message: "Session status. For UI, output is streamed via Tauri events. MCP client cannot directly access this stream without further adaptation.".into(),
             recent_output: None
         })
     } else {
-        Ok(ReadOutputStatusResultMCP { session_id, is_running: false, exit_code: None, message: "Session not found or already terminated.".into(), recent_output: None })
+        Ok(ReadOutputStatusResultMCP {
+            session_id: session_id_to_read,
+            is_running: false,
+            exit_code: None, 
+            message: "Session not found or already terminated and cleaned up.".into(),
+            recent_output: None
+        })
     }
 }

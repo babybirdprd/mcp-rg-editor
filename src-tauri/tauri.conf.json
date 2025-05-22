@@ -23,7 +23,7 @@
     "security": {
       "csp": null,
       "capabilities": [
-        "core:default"
+        "default"
       ]
     },
     "withGlobalTauri": true
@@ -42,51 +42,39 @@
   "plugins": {
     "fs": {
       "scope": [
-        "$APPCONFIG/**",
-        "$APPLOG/**",
-        "$APPDATA/**",
-        "$APPCACHE/**",
-        "$DESKTOP/**",
-        "$DOCUMENT/**",
-        "$DOWNLOAD/**",
-        "$HOME/**"
+        "$APPCONFIG/**", "$APPLOG/**", "$APPDATA/**", "$APPCACHE/**",
+        "$DESKTOP/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$HOME/**"
       ],
-      "globalScope": [
-        "$APPCONFIG/**",
-        "$APPLOG/**",
-        "$APPDATA/**",
-        "$APPCACHE/**",
-        "$DESKTOP/**",
-        "$DOCUMENT/**",
-        "$DOWNLOAD/**",
-        "$HOME/**"
+      "globalScope": [ 
+        "$APPCONFIG/**", "$APPLOG/**", "$APPDATA/**", "$APPCACHE/**",
+        "$DESKTOP/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$HOME/**"
       ]
     },
     "shell": {
-      "open": true,
+      "open": true, 
       "scope": [
-        { "name": "rg", "cmd": "rg", "args": true, "sidecar": false },
-        { "name": "sh", "cmd": "sh", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
-        { "name": "bash", "cmd": "bash", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
-        { "name": "powershell", "cmd": "powershell", "args": ["-Command", { "validator": "\\S+" }], "sidecar": false },
-        { "name": "cmd", "cmd": "cmd", "args": ["/C", { "validator": "\\S+" }], "sidecar": false }
+        { "name": "allow-rg", "cmd": "rg", "args": true, "sidecar": false },
+        { "name": "allow-sh", "cmd": "sh", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
+        { "name": "allow-bash", "cmd": "bash", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
+        { "name": "allow-powershell", "cmd": "powershell", "args": ["-Command", { "validator": "\\S+" }], "sidecar": false },
+        { "name": "allow-cmd", "cmd": "cmd", "args": ["/C", { "validator": "\\S+" }], "sidecar": false }
       ]
     },
-    "process": {},
+    "process": {}, 
     "http": {
-      "scope": ["https://*/*", "http://*/*"]
+      "scope": ["https://*/*", "http://*/*"] 
     },
     "dialog": {},
     "notification": {},
     "log": {
       "targets": [
-        {"name": "stdout", "level": "info"},
-        {"name": "logdir", "level": "debug", "path": "$APPLOG"},
+        {"name": "stdout", "level": "info"}, 
+        {"name": "logdir", "level": "debug", "path": "$APPLOG"}, 
         {"name": "webview", "level": "info"}
       ],
-      "maxSize": 5242880,
-      "rotationStrategy": "KeepOne",
-      "level": "info"
+      "maxSize": 5242880, 
+      "rotationStrategy": "KeepOne", 
+      "level": "info" 
     }
   }
 }

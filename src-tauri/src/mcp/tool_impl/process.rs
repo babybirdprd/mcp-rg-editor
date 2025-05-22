@@ -1,10 +1,9 @@
-// FILE: src-tauri/src/mcp/tool_impl/process.rs
 use crate::error::AppError;
 use crate::mcp::handler::ToolDependencies;
 use serde::{Deserialize, Serialize};
-use sysinfo::{Pid, Signal, ProcessRefreshKind, Uid, System as SysinfoSystem};
-use tokio::sync::MutexGuard;
-use tracing::{debug, instrument, warn};
+use sysinfo::{Pid, Signal, ProcessRefreshKind, Uid, System as SysinfoSystem}; // Keep SysinfoSystem import
+use tokio::sync::MutexGuard; // Keep MutexGuard
+use tracing::{debug, instrument, warn}; // Keep warn
 
 // --- MCP Specific Parameter Structs ---
 #[derive(Debug, Deserialize)]
@@ -17,7 +16,7 @@ pub struct ProcessInfoMCP {
     command: String, status: String, user: Option<String>, start_time_epoch_secs: u64,
 }
 #[derive(Debug, Serialize)]
-pub struct KillProcessResultMCP { pub success: bool, pub message: String } // Corrected syntax
+pub struct KillProcessResultMCP { pub success: bool, pub message: String }
 
 fn format_uid_mcp(uid_opt: Option<&Uid>) -> Option<String> {
     uid_opt.map(|uid| uid.to_string())
@@ -48,7 +47,7 @@ pub async fn mcp_kill_process(deps: &ToolDependencies, params: KillProcessParams
 
     if let Some(p) = sys_guard.process(pid_to_kill) {
         if p.kill_with(Signal::Term).unwrap_or(false) {
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await; // Use tokio::time::Duration
             sys_guard.refresh_process_specifics(pid_to_kill, ProcessRefreshKind::everything());
             if sys_guard.process(pid_to_kill).is_none() { return Ok(KillProcessResultMCP { success: true, message: format!("PID {} ({}) terminated with SIGTERM.", params.pid, proc_name) }); }
             debug!(pid = ?pid_to_kill, "Process still alive after SIGTERM.");
@@ -60,7 +59,7 @@ pub async fn mcp_kill_process(deps: &ToolDependencies, params: KillProcessParams
     sys_guard.refresh_process_specifics(pid_to_kill, ProcessRefreshKind::everything());
     if let Some(p) = sys_guard.process(pid_to_kill) {
         if p.kill_with(Signal::Kill).unwrap_or(false) {
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await; // Use tokio::time::Duration
             sys_guard.refresh_process_specifics(pid_to_kill, ProcessRefreshKind::everything());
             if sys_guard.process(pid_to_kill).is_none() { return Ok(KillProcessResultMCP { success: true, message: format!("PID {} ({}) terminated with SIGKILL.", params.pid, proc_name) }); }
             else {

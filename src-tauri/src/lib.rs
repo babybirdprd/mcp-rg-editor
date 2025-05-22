@@ -1,4 +1,3 @@
-// FILE: src-tauri/src/lib.rs
 mod commands;
 mod config;
 mod error;
@@ -9,17 +8,19 @@ use crate::commands::terminal_commands::ActiveSessionsMap;
 use crate::config::{Config, init_config_state, TransportMode as AppTransportMode};
 use crate::mcp::handler::EnhancedServerHandler;
 use crate::mcp::McpServerLaunchParams;
-use crate::commands::process_commands::SysinfoState;
 
 use std::sync::Arc;
-use tauri::{Manager, plugin::Plugin}; // Added Plugin trait for log plugin
+use tauri::Manager;
 use tracing::Level;
-use tracing_subscriber::{filter::EnvFilter, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use tracing_subscriber::{filter::EnvFilter, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, Layer as TracingLayerExt}; // Renamed Layer to avoid conflict
 
-use rust_mcp_sdk::mcp_server::{server_runtime, ServerRuntime as McpServerRuntime, McpServer}; // Added McpServer trait
+use rust_mcp_sdk::McpServer;
+use rust_mcp_sdk::mcp_server::{server_runtime, ServerRuntime as McpServerRuntime};
 use rust_mcp_sdk::error::McpSdkError;
 use rust_mcp_schema::{InitializeResult as McpInitializeResult, Implementation as McpImplementation, ServerCapabilities as McpServerCapabilities, ServerCapabilitiesTools as McpServerCapabilitiesTools, LATEST_PROTOCOL_VERSION as MCP_LATEST_PROTOCOL_VERSION};
 use rust_mcp_transport::{StdioTransport as McpStdioTransport, TransportOptions as McpTransportOptions};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_log::TauriLogger; // Assuming this is the correct type for the layer
 
 #[cfg(feature = "mcp-sse-server")]
 use rust_mcp_sdk::hyper_server::{create_server as create_mcp_sse_server, HyperServerOptions as McpHyperServerOptions, HyperServerRuntime as McpHyperServerRuntime};
@@ -40,43 +41,42 @@ fn setup_tracing_and_logging(log_level_str: &str, app_handle: &tauri::AppHandle)
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
-        .with_ansi(false)
-        .with_writer(std::io::stderr)
+        .with_ansi(false) // Typically false for file logs
+        .with_writer(std::io::stderr) // For console output via tracing
         .with_level(true)
         .with_span_events(FmtSpan::CLOSE);
 
-    let tauri_log_plugin_target_logdir = tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-        file_name: Some("app_ui.log".into()),
-    })
-    .level(level)
-    .filter(env_filter.clone());
+    let tauri_log_targets = [
+        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+            file_name: Some("app_backend.log".into()),
+        })
+        .filter(EnvFilter::new(format!("mcp_rg_editor_tauri_lib={}", level))), // Corrected method name
+        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview)
+            .filter(EnvFilter::new(format!("mcp_rg_editor_tauri_lib={}", Level::INFO))), // Corrected method name
+    ];
+    
+    // Construct the tauri_plugin_log::TauriLogger which implements tracing_subscriber::Layer
+    // The builder itself is used to configure the plugin, which is added later.
+    // For integrating with tracing_subscriber, we need a Layer.
+    // tauri_plugin_log::TauriLogger is the layer provided by the plugin.
+    let tauri_log_layer = TauriLogger::new(
+        tauri_plugin_log::Builder::default()
+            .targets(tauri_log_targets)
+            .level_for("hyper", tracing::Level::WARN) // Corrected to tracing::Level
+            .level_for("rustls", tracing::Level::WARN) // Corrected to tracing::Level
+            .build() // This build() is for the config part of TauriLogger
+    );
 
-    let tauri_webview_target = tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview)
-        .level(Level::INFO)
-        .filter(env_filter.clone());
 
     tracing_subscriber::registry()
         .with(fmt_layer)
+        .with(tauri_log_layer) // Add the TauriLogger layer
         .with(env_filter)
         .init();
-
-    let log_plugin_builder = tauri_plugin_log::Builder::default()
-        .targets([
-            tauri_log_plugin_target_logdir,
-            tauri_webview_target,
-        ])
-        .level_for("hyper", log::LevelFilter::Warn)
-        .level_for("rustls", log::LevelFilter::Warn);
-        // .colors(true) // Check if tauri_plugin_log::Builder has .colors() or similar
-
-    // It seems tauri_plugin_log::Builder does not have a .build() that returns impl Plugin
-    // Instead, it's directly used in app.plugin()
-    app_handle
-        .plugin(log_plugin_builder.build()) // Assuming build() returns the plugin
-        .expect("Failed to initialize tauri-plugin-log for UI");
-
-    tracing::info!("Tracing subscriber and tauri-plugin-log for UI initialized. Log level: {}", level);
+    
+    tracing::info!("Tracing subscriber and tauri-plugin-log initialized. Global log level: {}", level);
 }
+
 
 fn get_mcp_server_details(_app_config: &Config) -> McpInitializeResult {
     McpInitializeResult {
@@ -124,12 +124,13 @@ pub fn run() {
             let active_sessions_map: ActiveSessionsMap = Default::default();
             app.manage(active_sessions_map);
 
-            let sysinfo_state: SysinfoState = Arc::new(tokio::sync::Mutex::new(sysinfo::System::new_all()));
-            app.manage(sysinfo_state);
+            let sysinfo_state_for_mcp_and_commands = Arc::new(tokio::sync::Mutex::new(sysinfo::System::new_all()));
+            app.manage(sysinfo_state_for_mcp_and_commands.clone());
+
 
             let mcp_app_handle_clone = app_handle.clone();
             let mcp_config_state_clone = config_state_arc.clone();
-
+            
             let mcp_launch_params = McpServerLaunchParams {
                 app_handle: mcp_app_handle_clone,
                 config_state: mcp_config_state_clone,
@@ -141,6 +142,11 @@ pub fn run() {
                     let cfg_guard = mcp_launch_params.config_state.read().expect("Failed to read config for MCP transport");
                     cfg_guard.mcp_transport_mode.clone()
                 };
+
+                if transport_mode_from_config == AppTransportMode::Disabled {
+                    tracing::info!("MCP_TRANSPORT is 'disabled'. MCP server will not be started.");
+                    return;
+                }
 
                 let mcp_server_details = {
                     let cfg_guard = mcp_launch_params.config_state.read().expect("Failed to read config for MCP details");
@@ -156,7 +162,7 @@ pub fn run() {
                         let mcp_transport_opts = McpTransportOptions::default();
                         match McpStdioTransport::new(mcp_transport_opts) {
                             Ok(transport) => {
-                                let mcp_server_runtime: McpServerRuntime<_,_> = server_runtime::create_server(mcp_server_details, transport, mcp_handler);
+                                let mcp_server_runtime: McpServerRuntime = server_runtime::create_server(mcp_server_details, transport, mcp_handler);
                                 if let Err(e) = mcp_server_runtime.start().await.map_err(map_mcp_sdk_error_sync) {
                                     tracing::error!("MCP STDIO Server failed to start or shut down with error: {:?}", e);
                                 } else {
@@ -173,7 +179,7 @@ pub fn run() {
                         let (host, port) = {
                             let cfg_guard = mcp_launch_params.config_state.read().expect("Failed to read config for SSE params");
                             let sse_host = cfg_guard.mcp_sse_host.clone().unwrap_or_else(|| "127.0.0.1".to_string());
-                            let sse_port = cfg_guard.mcp_sse_port.unwrap_or(3030); // Default SSE port
+                            let sse_port = cfg_guard.mcp_sse_port.unwrap_or(3030);
                             (sse_host, sse_port)
                         };
                         tracing::info!("Starting MCP server with SSE transport on {}:{}", host, port);
@@ -183,23 +189,21 @@ pub fn run() {
                             enable_cors: true,
                             ..Default::default()
                         };
-                        let mcp_sse_server_runtime: McpHyperServerRuntime<_,_> = create_mcp_sse_server(mcp_server_details, mcp_handler, mcp_sse_options);
+                        let mcp_sse_server_runtime: McpHyperServerRuntime = create_mcp_sse_server(mcp_server_details, mcp_handler, mcp_sse_options);
                          if let Err(e) = mcp_sse_server_runtime.start().await.map_err(map_mcp_sdk_error_sync) {
                             tracing::error!("MCP SSE Server failed to start or shut down with error: {:?}", e);
                         } else {
                             tracing::info!("MCP SSE Server shut down.");
                         }
                     }
-                     _ => { // This handles cases where the feature for the configured mode is not active.
+                     _ => { 
                         if transport_mode_from_config == AppTransportMode::Stdio && !cfg!(feature="mcp-stdio-server") {
                              tracing::error!("MCP_TRANSPORT is 'stdio' but 'mcp-stdio-server' feature is not enabled in Cargo.toml.");
                         } else if transport_mode_from_config == AppTransportMode::Sse && !cfg!(feature="mcp-sse-server") {
                              tracing::error!("MCP_TRANSPORT is 'sse' but 'mcp-sse-server' feature is not enabled in Cargo.toml.");
-                        } else if transport_mode_from_config != AppTransportMode::Stdio && transport_mode_from_config != AppTransportMode::Sse {
+                        } else if transport_mode_from_config != AppTransportMode::Stdio && transport_mode_from_config != AppTransportMode::Sse && transport_mode_from_config != AppTransportMode::Disabled {
                              tracing::warn!("Unknown MCP_TRANSPORT mode configured: {:?}. MCP server not started.", transport_mode_from_config);
-                        } else {
-                             // This case implies the mode is valid but the corresponding feature is off.
-                             // The specific error messages above cover this.
+                        } else if transport_mode_from_config != AppTransportMode::Disabled {
                              tracing::info!("MCP server not started as the configured transport mode ({:?}) feature is not enabled.", transport_mode_from_config);
                         }
                     }
@@ -209,12 +213,12 @@ pub fn run() {
 
             if which::which("rg").is_err() {
                 tracing::warn!("ripgrep (rg) is not installed or not in PATH. `search_code` tool will fail.");
-                let dialog_handle = app_handle.dialog(); // Use DialogExt
+                let dialog_handle = app_handle.dialog();
                 dialog_handle
                     .message("The 'search_code' tool requires ripgrep (rg) to be installed and in your system's PATH for full functionality.")
                     .title("Ripgrep Not Found")
                     .kind(tauri_plugin_dialog::MessageDialogKind::Warning)
-                    .ok_button_label("OK")
+                    .buttons(MessageDialogButtons::Ok)
                     .show(|_| {});
             }
             tracing::info!(version = %env!("CARGO_PKG_VERSION"), "MCP-RG-Editor Tauri UI backend setup complete.");
@@ -226,28 +230,14 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
-        // Note: tauri-plugin-log is initialized in setup_tracing_and_logging
+        // tauri_plugin_log is initialized via setup_tracing_and_logging, not added as a plugin here
+        // as it's integrated into the tracing subscriber.
+        // If direct plugin usage is needed, add: .plugin(tauri_plugin_log::Builder::default().build())
+        // but ensure it doesn't conflict with the tracing layer.
         .invoke_handler(tauri::generate_handler![
             commands::greet,
             commands::config_commands::get_config_command,
             commands::config_commands::set_config_value_command,
-            commands::filesystem_commands::read_file_command,
-            commands::filesystem_commands::read_multiple_files_command,
-            commands::filesystem_commands::write_file_command,
-            commands::filesystem_commands::create_directory_command,
-            commands::filesystem_commands::list_directory_command,
-            commands::filesystem_commands::move_file_command,
-            commands::filesystem_commands::get_file_info_command,
-            commands::filesystem_commands::search_files_command,
-            commands::ripgrep_commands::search_code_command,
-            // Terminal commands are primarily for MCP, UI might not need direct invoke
-            // commands::terminal_commands::execute_command_ui, 
-            // commands::terminal_commands::force_terminate_session_ui,
-            // commands::terminal_commands::list_sessions_ui,
-            // commands::terminal_commands::read_session_output_status_ui,
-            commands::process_commands::list_processes_command,
-            commands::process_commands::kill_process_command,
-            commands::edit_commands::edit_block_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

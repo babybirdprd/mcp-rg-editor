@@ -1,51 +1,24 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "core:default",
-  "description": "Default permissions for MCP-RG-Editor Tauri",
+  "identifier": "default",
+  "description": "Default permissions for MCP-RG-Editor Tauri application.",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "core:path:default",
-    "core:event:default",
-    "core:window:default",
-    "core:app:default",
-    "core:resources:default",
-    "core:menu:default",
-    "core:tray:default",
     "shell:default",
-    "shell:allow-open",
     {
       "identifier": "shell:allow-execute",
       "allow": [
-        { "name": "rg", "cmd": "rg", "args": true },
-        { "name": "sh", "cmd": "sh", "args": ["-c", { "validator": "\\S+" }] },
-        { "name": "bash", "cmd": "bash", "args": ["-c", { "validator": "\\S+" }] },
-        { "name": "powershell", "cmd": "powershell", "args": ["-Command", { "validator": "\\S+" }] },
-        { "name": "cmd", "cmd": "cmd", "args": ["/C", { "validator": "\\S+" }] }
+        { "name": "allow-rg-execution", "cmd": "rg", "args": true},
+        { "name": "allow-sh-c", "cmd": "sh", "args": ["-c", { "validator": ".*" }]},
+        { "name": "allow-bash-c", "cmd": "bash", "args": ["-c", { "validator": ".*" }] },
+        { "name": "allow-powershell-command", "cmd": "powershell", "args": ["-Command", { "validator": ".*" }]},
+        { "name": "allow-cmd-c", "cmd": "cmd", "args": ["/C", { "validator": ".*" }]}
       ]
     },
     "fs:default",
-    "fs:allow-app-read",
-    "fs:allow-app-write",
-    "fs:allow-appdata-read",
-    "fs:allow-appdata-write",
-    "fs:allow-applog-read",
-    "fs:allow-applog-write",
-    "fs:allow-appconfig-read",
-    "fs:allow-appconfig-write",
-    "fs:allow-appcache-read",
-    "fs:allow-appcache-write",
-    "fs:allow-desktop-read",
-    "fs:allow-desktop-write",
-    "fs:allow-document-read",
-    "fs:allow-document-write",
-    "fs:allow-download-read",
-    "fs:allow-download-write",
-    "fs:allow-home-read",
-    "fs:allow-home-write",
     "process:default",
     "http:default",
-    "http:allow-fetch",
     "dialog:default",
     "notification:default",
     "log:default"
@@ -62,17 +35,6 @@
         "$DOWNLOAD/**",
         "$HOME/**"
       ]
-    },
-    "shell": {
-      "execute": {
-        "allow": [
-          { "name": "rg", "cmd": "rg", "args": true },
-          { "name": "sh", "cmd": "sh", "args": ["-c", { "validator": "\\S+" }] },
-          { "name": "bash", "cmd": "bash", "args": ["-c", { "validator": "\\S+" }] },
-          { "name": "powershell", "cmd": "powershell", "args": ["-Command", { "validator": "\\S+" }] },
-          { "name": "cmd", "cmd": "cmd", "args": ["/C", { "validator": "\\S+" }] }
-        ]
-      }
     }
   }
 }

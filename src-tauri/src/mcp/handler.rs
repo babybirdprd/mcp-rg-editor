@@ -1,4 +1,3 @@
-// FILE: src-tauri/src/mcp/handler.rs
 use crate::config::Config;
 use crate::error::AppError;
 use crate::mcp::schemas::*;
@@ -9,14 +8,15 @@ use crate::commands::terminal_commands::ActiveSessionsMap;
 use sysinfo::System as SysinfoSystem;
 
 use async_trait::async_trait;
-use rust_mcp_sdk::mcp_server::{ServerHandler, McpServer};
+use rust_mcp_sdk::McpServer;
+use rust_mcp_sdk::mcp_server::ServerHandler;
 use rust_mcp_schema::{
-    CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content,
-    schema_utils::CallToolError, RpcError, json_rpc::RpcErrorCode,
+    CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content, // Content is a valid top-level import
+    schema_utils::CallToolError, RpcError, RpcErrorCode, // RpcErrorCode is also a valid top-level import
 };
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::sync::{Arc, RwLock as StdRwLock};
-use tauri::{AppHandle, Manager}; // Removed State as it's not directly used here
+use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex as TokioMutex;
 use tracing::{error, info, instrument};
 
@@ -59,7 +59,7 @@ fn mcp_call_tool_error_from_app_error(app_err: AppError, tool_name: &str) -> Cal
     error!(error = %app_err, tool = tool_name, "Error during MCP tool execution");
     let rpc_error_code = match app_err {
         AppError::InvalidInputArgument(_) | AppError::PathNotAllowed(_) | AppError::PathTraversal(_) | AppError::InvalidPath(_) => RpcErrorCode::InvalidParams,
-        AppError::CommandBlocked(_) => RpcErrorCode::ServerError(-32001),
+        AppError::CommandBlocked(_) => RpcErrorCode::ServerError(-32001), 
         _ => RpcErrorCode::InternalError,
     };
     CallToolError::new(RpcError::new(rpc_error_code, app_err.to_string(), None))
@@ -69,10 +69,16 @@ fn create_mcp_json_call_tool_result(value: Value) -> Result<CallToolResult, Call
     let content_item = Content::Other {
         type_: "json".to_string(),
         data: Some(value),
-        text: None, mime_type: Some("application/json".to_string()), resource_id: None,
-        name: None, size: None, created_at: None, updated_at: None, meta: None,
+        text: None,
+        mime_type: Some("application/json".to_string()),
+        resource_id: None,
+        name: None,
+        size: None,
+        created_at: None,
+        updated_at: None,
+        meta: None,
     };
-    Ok(CallToolResult::new(vec![content_item], None)) // Assuming CallToolResult::new exists
+    Ok(CallToolResult { content: vec![content_item], meta: None, is_error: Some(false) }) // Added is_error
 }
 
 
@@ -85,25 +91,24 @@ impl ServerHandler for EnhancedServerHandler {
         _runtime: &dyn McpServer,
     ) -> Result<ListToolsResult, RpcError> {
         info!("MCP: Handling list_tools request");
-        // Using Tool::new from rust-mcp-schema
         let tools = vec![
-            Tool::new("mcp_get_config".to_string(), Some("Get the MCP server's current runtime configuration.".to_string()), Some(get_mcp_config_schema()), None),
-            Tool::new("read_file".to_string(), Some("Read content of a local file or URL.".to_string()), Some(read_file_mcp_schema()), None),
-            Tool::new("write_file".to_string(), Some("Write/append content to a file.".to_string()), Some(write_file_mcp_schema()), None),
-            Tool::new("create_directory".to_string(), Some("Create directories, including nested ones.".to_string()), Some(create_directory_mcp_schema()), None),
-            Tool::new("list_directory".to_string(), Some("List directory contents.".to_string()), Some(list_directory_mcp_schema()), None),
-            Tool::new("move_file".to_string(), Some("Move or rename files or directories.".to_string()), Some(move_file_mcp_schema()), None),
-            Tool::new("get_file_info".to_string(), Some("Get metadata for a file or directory.".to_string()), Some(get_file_info_mcp_schema()), None),
-            Tool::new("read_multiple_files".to_string(), Some("Read multiple local files.".to_string()), Some(read_multiple_files_mcp_schema()), None),
-            Tool::new("search_files".to_string(), Some("Find files/dirs by name.".to_string()), Some(search_files_mcp_schema()), None),
-            Tool::new("search_code".to_string(), Some("Search code with Ripgrep.".to_string()), Some(search_code_mcp_schema()), None),
-            Tool::new("execute_command".to_string(), Some("Run terminal commands. Output is streamed via events if using Tauri UI; for MCP, initial output/status returned.".to_string()), Some(execute_command_mcp_schema()), None),
-            Tool::new("force_terminate_session".to_string(), Some("Stop a running command session by its ID.".to_string()), Some(force_terminate_mcp_schema()), None),
-            Tool::new("list_sessions".to_string(), Some("List active command sessions.".to_string()), Some(list_sessions_mcp_schema()), None),
-            Tool::new("read_session_output_status".to_string(), Some("Get status of a command session. For MCP, this might include buffered output if designed so.".to_string()), Some(read_session_output_status_mcp_schema()), None),
-            Tool::new("list_processes".to_string(), Some("List system processes.".to_string()), Some(list_processes_mcp_schema()), None),
-            Tool::new("kill_process".to_string(), Some("Terminate a system process by PID.".to_string()), Some(kill_process_mcp_schema()), None),
-            Tool::new("edit_block".to_string(), Some("Apply targeted text replacements in a file.".to_string()), Some(edit_block_mcp_schema()), None),
+            Tool { name: "mcp_get_config".to_string(), description: Some("Get the MCP server's current runtime configuration.".to_string()), input_schema: get_mcp_config_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "read_file".to_string(), description: Some("Read content of a local file or URL.".to_string()), input_schema: read_file_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "write_file".to_string(), description: Some("Write/append content to a file.".to_string()), input_schema: write_file_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "create_directory".to_string(), description: Some("Create directories, including nested ones.".to_string()), input_schema: create_directory_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "list_directory".to_string(), description: Some("List directory contents.".to_string()), input_schema: list_directory_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "move_file".to_string(), description: Some("Move or rename files or directories.".to_string()), input_schema: move_file_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "get_file_info".to_string(), description: Some("Get metadata for a file or directory.".to_string()), input_schema: get_file_info_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "read_multiple_files".to_string(), description: Some("Read multiple local files.".to_string()), input_schema: read_multiple_files_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "search_files".to_string(), description: Some("Find files/dirs by name.".to_string()), input_schema: search_files_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "search_code".to_string(), description: Some("Search code with Ripgrep.".to_string()), input_schema: search_code_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "execute_command".to_string(), description: Some("Run terminal commands. Output is streamed via events if using Tauri UI; for MCP, initial output/status returned.".to_string()), input_schema: execute_command_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "force_terminate_session".to_string(), description: Some("Stop a running command session by its ID.".to_string()), input_schema: force_terminate_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "list_sessions".to_string(), description: Some("List active command sessions.".to_string()), input_schema: list_sessions_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "read_session_output_status".to_string(), description: Some("Get status of a command session. For MCP, this might include buffered output if designed so.".to_string()), input_schema: read_session_output_status_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "list_processes".to_string(), description: Some("List system processes.".to_string()), input_schema: list_processes_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "kill_process".to_string(), description: Some("Terminate a system process by PID.".to_string()), input_schema: kill_process_mcp_schema(), output_schema: None, resources_request: None, meta: None },
+            Tool { name: "edit_block".to_string(), description: Some("Apply targeted text replacements in a file.".to_string()), input_schema: edit_block_mcp_schema(), output_schema: None, resources_request: None, meta: None },
         ];
         Ok(ListToolsResult { tools, meta: None, next_cursor: None })
     }
@@ -118,7 +123,7 @@ impl ServerHandler for EnhancedServerHandler {
         let args_value = Value::Object(request.params.arguments.clone().unwrap_or_default());
         info!(tool_name = %tool_name, "MCP: Handling call_tool request");
         
-        self.deps.audit_logger.log_command_call(tool_name, &args_value).await;
+        self.deps.audit_logger.log_command_call(&format!("mcp_{}", tool_name), &args_value).await;
 
         match tool_name {
             "mcp_get_config" => {

@@ -1,5 +1,3 @@
-// FILE: src-tauri/src/mcp/tool_impl/edit.rs
-// IMPORTANT NOTE: Rewrite the entire file.
 use crate::config::Config;
 use crate::error::AppError;
 use crate::mcp::handler::ToolDependencies;
@@ -8,16 +6,17 @@ use crate::utils::line_ending_handler::{detect_line_ending, normalize_line_endin
 use crate::utils::path_utils::validate_and_normalize_path;
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf; // Use PathBuf consistently
-use std::sync::RwLockReadGuard;
-use tauri::Manager;
-use tracing::{debug, instrument, warn};
+use std::path::PathBuf;
+// use std::sync::RwLockReadGuard; // No longer needed directly in this file's functions
+// use tauri::AppHandle; // No longer needed directly
+use tauri_plugin_fs::FsExt; // Added FsExt
+use tracing::{debug, instrument, warn}; // Corrected warn import
 use std::time::Instant;
 use chrono::Utc;
 use diff;
 
 // --- MCP Specific Parameter Struct ---
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct EditBlockParamsMCP {
     pub file_path: String,
     pub old_string: String,
@@ -46,30 +45,32 @@ pub struct FuzzyMatchDetailsMCP {
 
 const FUZZY_SIMILARITY_THRESHOLD_MCP: f64 = 0.7;
 
-async fn read_file_for_edit_mcp(
+async fn read_file_for_edit_mcp_internal(
     app_handle: &tauri::AppHandle,
     file_path_str: &str,
-    cfg_guard: &RwLockReadGuard<'_, Config>
+    config: &Config // Pass &Config
 ) -> Result<(String, PathBuf, LineEndingStyle), AppError> {
-    let path = validate_and_normalize_path(file_path_str, cfg_guard, true, false)?;
+    // validate_and_normalize_path now takes &Config
+    let path = validate_and_normalize_path(file_path_str, config, true, false)?;
     if !app_handle.fs_scope().is_allowed(&path) {
         return Err(AppError::PathNotAllowed(format!("Read denied by FS scope: {}", path.display())));
     }
-    let content_bytes = app_handle.fs().read_binary(&path).await
-        .map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to read binary file {}: {}", path.display(), e)})?;
-    let original_content = String::from_utf8(content_bytes)
-        .map_err(|e| AppError::EditError(format!("File {} is not valid UTF-8: {}", path.display(), e)))?;
+    // Use app_handle.fs() for filesystem operations
+    let original_content = app_handle.fs().read_text_file(&path).await
+        .map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to read text file {}: {}", path.display(), e)})?;
     Ok((original_content, path, detect_line_ending(&original_content)))
 }
 
+
 async fn write_file_after_edit_mcp(
     app_handle: &tauri::AppHandle,
-    path_obj: &PathBuf, // Changed to PathBuf
+    path_obj: &PathBuf,
     content: String
 ) -> Result<(), AppError> {
     if !app_handle.fs_scope().is_allowed(path_obj) {
         return Err(AppError::PathNotAllowed(format!("Write denied by FS scope: {}", path_obj.display())));
     }
+    // Use app_handle.fs() for filesystem operations
     app_handle.fs().write_text_file(path_obj, content).await
         .map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to write text file {}: {}", path_obj.display(), e)})
 }
@@ -82,13 +83,17 @@ pub async fn mcp_edit_block(
 ) -> Result<EditBlockResultMCP, AppError> {
     if params.old_string.is_empty() { return Err(AppError::EditError("old_string cannot be empty.".into())); }
 
-    let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-    let (original_content, validated_path, file_line_ending) =
-        read_file_for_edit_mcp(&deps.app_handle, params.file_path.as_str(), &config_guard).await?;
+    let (original_content, validated_path, file_line_ending, fuzzy_log_path, _files_root_for_log) = { // _files_root_for_log marked unused
+        let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
+        // Pass &*config_guard to get &Config
+        let (content, path, ending) = read_file_for_edit_mcp_internal(&deps.app_handle, &params.file_path, &*config_guard).await?;
+        (content, path, ending, config_guard.fuzzy_search_log_file.clone(), config_guard.files_root.clone())
+    };
+    
     let file_ext = validated_path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
 
-    let norm_old = normalize_line_endings(params.old_string.as_str(), file_line_ending);
-    let norm_new = normalize_line_endings(params.new_string.as_str(), file_line_ending);
+    let norm_old = normalize_line_endings(&params.old_string, file_line_ending);
+    let norm_new = normalize_line_endings(&params.new_string, file_line_ending);
     let occurrences: Vec<_> = original_content.match_indices(&norm_old).collect();
     let actual_occurrences = occurrences.len();
 
@@ -132,10 +137,9 @@ pub async fn mcp_edit_block(
 
     let fuzzy_details = FuzzyMatchDetailsMCP {
         similarity_percent: similarity * 100.0, execution_time_ms: fuzzy_time_ms,
-        diff_highlight: diff_hl.clone(), log_path_suggestion: config_guard.fuzzy_search_log_file.display().to_string()
+        diff_highlight: diff_hl.clone(), log_path_suggestion: fuzzy_log_path.display().to_string()
     };
-    drop(config_guard); // Release read lock
-
+    
     if similarity >= FUZZY_SIMILARITY_THRESHOLD_MCP {
         Ok(EditBlockResultMCP {
             file_path: params.file_path, replacements_made: 0,
@@ -147,7 +151,6 @@ pub async fn mcp_edit_block(
     }
 }
 
-// Copied internal helpers from original edit_tool.rs
 fn find_best_fuzzy_match_internal(text: &str, query: &str) -> (String, f64) {
     if text.is_empty() || query.is_empty() { return ("".to_string(), 0.0); }
     let mut best_similarity = 0.0; let mut best_match_str = "";
@@ -178,12 +181,18 @@ struct CharCodeDataInternal { report: String, unique_count: usize, diff_length: 
 fn get_character_code_data_internal(expected: &str, actual: &str) -> CharCodeDataInternal {
     use std::collections::HashMap; let mut prefix_len = 0;
     let min_char_len = std::cmp::min(expected.chars().count(), actual.chars().count());
-    let mut expected_chars_iter = expected.chars(); let mut actual_chars_iter = actual.chars(); // Renamed to avoid conflict
-    for _ in 0..min_char_len { if expected_chars_iter.next() == actual_chars_iter.next() { prefix_len +=1; } else { break; }}
-    expected_chars_iter = expected.chars().rev(); actual_chars_iter = actual.chars().rev(); let mut suffix_len = 0;
-    for _ in 0..(min_char_len - prefix_len) { if expected_chars_iter.next() == actual_chars_iter.next() { suffix_len +=1; } else { break; }}
-    let expected_diff_str: String = expected.chars().skip(prefix_len).take(expected.chars().count() - prefix_len - suffix_len).collect();
-    let actual_diff_str: String = actual.chars().skip(prefix_len).take(actual.chars().count() - prefix_len - suffix_len).collect();
+    let mut expected_chars_iter_prefix = expected.chars();
+    let mut actual_chars_iter_prefix = actual.chars();
+    for _ in 0..min_char_len { if expected_chars_iter_prefix.next() == actual_chars_iter_prefix.next() { prefix_len +=1; } else { break; }}
+    
+    let mut expected_chars_rev_iter = expected.chars().rev();
+    let mut actual_chars_rev_iter = actual.chars().rev();
+    let mut suffix_len = 0;
+    for _ in 0..(min_char_len - prefix_len) { if expected_chars_rev_iter.next() == actual_chars_rev_iter.next() { suffix_len +=1; } else { break; }}
+    
+    let expected_diff_str: String = expected.chars().skip(prefix_len).take(expected.chars().count().saturating_sub(prefix_len).saturating_sub(suffix_len)).collect();
+    let actual_diff_str: String = actual.chars().skip(prefix_len).take(actual.chars().count().saturating_sub(prefix_len).saturating_sub(suffix_len)).collect();
+    
     let mut char_codes: HashMap<u32, usize> = HashMap::new();
     let full_diff_str = format!("{}{}", expected_diff_str, actual_diff_str);
     for ch in full_diff_str.chars() { *char_codes.entry(ch as u32).or_insert(0) += 1; }
