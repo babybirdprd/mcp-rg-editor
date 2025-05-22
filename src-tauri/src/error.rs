@@ -1,15 +1,14 @@
 // FILE: src-tauri/src/error.rs
-// IMPORTANT NOTE: Rewrite the entire file.
 use serde::Serialize;
 use thiserror::Error;
 
 #[derive(Error, Debug, Serialize)]
 pub enum AppError {
     #[error("I/O error: {0}")]
-    StdIoError(String),
+    StdIoError(String), // Changed from std::io::Error to String for Serialize
 
     #[error("Tokio I/O error: {0}")]
-    TokioIoError(String),
+    TokioIoError(String), // Changed from tokio::io::Error to String for Serialize
 
     #[error("Ripgrep error: {0}")]
     RipgrepError(String),
@@ -24,7 +23,7 @@ pub enum AppError {
     InvalidPath(String),
 
     #[error("Configuration error: {0}")]
-    ConfigError(String),
+    ConfigError(String), // Changed from anyhow::Error
 
     #[error("Command execution error: {0}")]
     CommandExecutionError(String),
@@ -42,10 +41,10 @@ pub enum AppError {
     EditError(String),
 
     #[error("Serde JSON error: {0}")]
-    SerdeJsonError(String),
+    SerdeJsonError(String), // Changed from serde_json::Error
 
     #[error("Reqwest HTTP error: {0}")]
-    ReqwestError(String),
+    ReqwestError(String), // Changed from reqwest::Error
 
     #[error("Operation timed out: {0}")]
     TimeoutError(String),
@@ -54,7 +53,7 @@ pub enum AppError {
     InvalidInputArgument(String),
 
     #[error("Tauri API error: {0}")]
-    TauriApiError(String),
+    TauriApiError(String), // Changed from tauri::Error
 
     #[error("Plugin error ({plugin}): {message}")]
     PluginError { plugin: String, message: String },
@@ -63,6 +62,7 @@ pub enum AppError {
     Unknown(String),
 }
 
+// Implement From for common error types to AppError, converting them to String.
 impl From<std::io::Error> for AppError {
     fn from(err: std::io::Error) -> Self {
         AppError::StdIoError(err.to_string())
@@ -83,6 +83,7 @@ impl From<serde_json::Error> for AppError {
 
 impl From<anyhow::Error> for AppError {
     fn from(err: anyhow::Error) -> Self {
+        // Using format! to capture the full context of anyhow::Error
         AppError::ConfigError(format!("{:?}", err))
     }
 }
@@ -95,11 +96,12 @@ impl From<reqwest::Error> for AppError {
 
 impl From<tauri::Error> for AppError {
     fn from(err: tauri::Error) -> Self {
-        AppError::TauriApiError(format!("{:?}", err))
+        AppError::TauriApiError(format!("{:?}", err)) // tauri::Error might not be simple string
     }
 }
 
 // Allows `Result<T, AppError>` to be used in Tauri commands
+// by converting AppError into a String that Tauri can serialize.
 impl From<AppError> for String {
     fn from(error: AppError) -> Self {
         error.to_string()

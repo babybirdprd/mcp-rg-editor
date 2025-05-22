@@ -1,5 +1,4 @@
 // FILE: src-tauri/src/commands/ripgrep_commands.rs
-// IMPORTANT NOTE: Rewrite the entire file.
 use crate::config::Config;
 use crate::error::AppError;
 use crate::utils::path_utils::validate_and_normalize_path;
@@ -13,7 +12,7 @@ use tauri_plugin_shell::ShellExt;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, instrument, warn};
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)] // Added Serialize for audit_log
 pub struct SearchCodeParams {
     pub pattern: String,
     #[serde(default)]
@@ -24,7 +23,7 @@ pub struct SearchCodeParams {
     pub ignore_case: bool,
     #[serde(default)]
     pub case_sensitive: bool,
-    #[serde(default = "default_true", alias = "lineNumbers")]
+    #[serde(default = "default_true_rg")]
     pub line_numbers: bool,
     #[serde(alias = "contextLines")]
     pub context_lines: Option<usize>,
@@ -32,7 +31,7 @@ pub struct SearchCodeParams {
     pub file_pattern: Option<String>,
     #[serde(alias = "maxDepth")]
     pub max_depth: Option<usize>,
-    #[serde(default = "default_usize_1000", alias = "maxResults")]
+    #[serde(default = "default_usize_1000_rg")]
     pub max_results: usize,
     #[serde(default, alias = "includeHidden")]
     pub include_hidden: bool,
@@ -40,8 +39,8 @@ pub struct SearchCodeParams {
     pub timeout_ms: Option<u64>,
 }
 
-fn default_true() -> bool { true }
-fn default_usize_1000() -> usize { 1000 }
+fn default_true_rg() -> bool { true } // Renamed to avoid conflict
+fn default_usize_1000_rg() -> usize { 1000 } // Renamed
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RipgrepMatch {
@@ -109,16 +108,16 @@ pub async fn search_code_command(
     rg_args.push(params.pattern.clone());
     rg_args.push(search_path_validated.to_string_lossy().to_string());
 
-    let shell_scope = app_handle.shell().scope();
+    let shell_scope = app_handle.shell().scope(); // Use ShellExt
     if !shell_scope.is_allowed(&rg_exe_path.to_string_lossy(), &rg_args) {
         warn!(command = %rg_exe_path.display(), args = ?rg_args, "Ripgrep command execution not allowed by shell scope.");
         return Err(AppError::CommandBlocked("Execution of ripgrep (rg) not permitted by shell scope.".to_string()));
     }
 
     let start_time = std::time::Instant::now();
-    let command_future = app_handle.shell().command(rg_exe_path.to_string_lossy().to_string())
-        .args(rg_args.clone()) // Clone args for logging/error reporting
-        .current_dir(&search_path_validated)
+    let command_future = app_handle.shell().command(rg_exe_path.to_string_lossy().to_string()) // Use ShellExt
+        .args(rg_args.clone())
+        .current_dir(&search_path_validated) // Important to set CWD for rg
         .output();
 
     let timeout_duration = Duration::from_millis(params.timeout_ms.unwrap_or(30000));
@@ -189,7 +188,7 @@ pub async fn search_code_command(
         }
         Err(_) => {
             let elapsed_ms = start_time.elapsed().as_millis() as u64;
-            warn!(pattern = %params.pattern, path = %params.path, timeout = timeout_duration.as_millis(), "Ripgrep search timed out");
+            warn!(pattern = %params.pattern, path = %params.path.clone(), timeout = timeout_duration.as_millis(), "Ripgrep search timed out");
             Ok(SearchCodeResult { matches: vec![], stats: SearchStats { matched_lines: 0, elapsed_ms }, timed_out: true, error_message: Some("Search operation timed out.".to_string()) })
         }
     }

@@ -1,15 +1,14 @@
 // FILE: src-tauri/src/mcp/tool_impl/process.rs
-// IMPORTANT NOTE: Rewrite the entire file.
 use crate::error::AppError;
-use crate::mcp::handler::ToolDependencies; // Correctly use ToolDependencies
+use crate::mcp::handler::ToolDependencies;
 use serde::{Deserialize, Serialize};
-use sysinfo::{Pid, Signal, ProcessRefreshKind, Uid, System as SysinfoSystem}; // Added System
-use tokio::sync::MutexGuard; // For working with the MutexGuard
+use sysinfo::{Pid, Signal, ProcessRefreshKind, Uid, System as SysinfoSystem};
+use tokio::sync::MutexGuard;
 use tracing::{debug, instrument, warn};
 
 // --- MCP Specific Parameter Structs ---
 #[derive(Debug, Deserialize)]
-pub struct KillProcessParamsMCP { pub pid: usize; }
+pub struct KillProcessParamsMCP { pub pid: usize }
 
 // --- MCP Specific Result Structs ---
 #[derive(Debug, Serialize)]
@@ -18,7 +17,7 @@ pub struct ProcessInfoMCP {
     command: String, status: String, user: Option<String>, start_time_epoch_secs: u64,
 }
 #[derive(Debug, Serialize)]
-pub struct KillProcessResultMCP { pub success: bool, pub message: String; }
+pub struct KillProcessResultMCP { pub success: bool, pub message: String } // Corrected syntax
 
 fn format_uid_mcp(uid_opt: Option<&Uid>) -> Option<String> {
     uid_opt.map(|uid| uid.to_string())
@@ -58,7 +57,7 @@ pub async fn mcp_kill_process(deps: &ToolDependencies, params: KillProcessParams
         }
     }
 
-    sys_guard.refresh_process_specifics(pid_to_kill, ProcessRefreshKind::everything()); // Refresh again
+    sys_guard.refresh_process_specifics(pid_to_kill, ProcessRefreshKind::everything());
     if let Some(p) = sys_guard.process(pid_to_kill) {
         if p.kill_with(Signal::Kill).unwrap_or(false) {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -70,13 +69,13 @@ pub async fn mcp_kill_process(deps: &ToolDependencies, params: KillProcessParams
             }
         } else {
             warn!(pid = ?pid_to_kill, "Failed to send SIGKILL.");
-            sys_guard.refresh_process_specifics(pid_to_kill, ProcessRefreshKind::everything()); // Final check
+            sys_guard.refresh_process_specifics(pid_to_kill, ProcessRefreshKind::everything());
             if sys_guard.process(pid_to_kill).is_none() {
                 return Ok(KillProcessResultMCP { success: true, message: format!("PID {} ({}) no longer found after failed SIGKILL, likely terminated.", params.pid, proc_name) });
             }
             return Ok(KillProcessResultMCP { success: false, message: format!("Failed to send SIGKILL to PID {} ({}).", params.pid, proc_name) });
         }
-    } else { // Process not found before SIGKILL attempt
+    } else {
         debug!(pid = ?pid_to_kill, "Process not found before SIGKILL, assuming terminated.");
         return Ok(KillProcessResultMCP { success: true, message: format!("PID {} ({}) no longer found, likely terminated.", params.pid, proc_name) });
     }

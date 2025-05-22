@@ -1,6 +1,4 @@
 // FILE: src-tauri/src/mcp/schemas.rs
-// IMPORTANT NOTE: Rewrite the entire file.
-// These schemas are for the MCP interface.
 use rust_mcp_schema::ToolInputSchema;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -26,15 +24,23 @@ fn create_enum_prop(enum_values: Vec<&str>, default_value: &str, description: &s
 
 const MCP_PATH_GUIDANCE: &str = "IMPORTANT: Paths should be absolute or tilde-expanded (~/...). The server will resolve them against its configured FILES_ROOT if relative, but absolute/tilde is preferred for clarity.";
 
+// Corrected build_mcp_schema to return Option<Value>
 fn build_mcp_schema(required: Vec<String>, properties: Option<HashMap<String, Value>>) -> Option<Value> {
     properties.map(|props| {
-        json!({ "type": "object", "properties": props, "required": required })
+        json!({
+            "type": "object",
+            "properties": props,
+            "required": required
+        })
     })
 }
 
 // --- MCP Tool Schemas ---
 pub fn get_mcp_config_schema() -> ToolInputSchema {
-    ToolInputSchema::new(vec![], None) // No input params for getting config
+    ToolInputSchema { // Directly construct if `new` is problematic
+        required: vec![],
+        input_schema: None, // No input params for getting config
+    }
 }
 
 pub fn read_file_mcp_schema() -> ToolInputSchema {
@@ -44,7 +50,10 @@ pub fn read_file_mcp_schema() -> ToolInputSchema {
     props.insert("offset".to_string(), create_prop_with_default_int("integer", "Line offset for text files.", 0));
     props.insert("length".to_string(), json!({"type": "integer", "description": "Max lines to read for text files."}));
     let req = vec!["path".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn write_file_mcp_schema() -> ToolInputSchema {
@@ -53,21 +62,30 @@ pub fn write_file_mcp_schema() -> ToolInputSchema {
     props.insert("content".to_string(), create_prop("string", "Content to write."));
     props.insert("mode".to_string(), create_enum_prop(vec!["rewrite", "append"], "rewrite", "Write mode."));
     let req = vec!["path".to_string(), "content".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn create_directory_mcp_schema() -> ToolInputSchema {
     let mut props = HashMap::new();
     props.insert("path".to_string(), create_prop("string", &format!("Directory path to create. {}", MCP_PATH_GUIDANCE)));
     let req = vec!["path".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn list_directory_mcp_schema() -> ToolInputSchema {
     let mut props = HashMap::new();
     props.insert("path".to_string(), create_prop("string", &format!("Directory path to list. {}", MCP_PATH_GUIDANCE)));
     let req = vec!["path".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn move_file_mcp_schema() -> ToolInputSchema {
@@ -75,21 +93,30 @@ pub fn move_file_mcp_schema() -> ToolInputSchema {
     props.insert("source".to_string(), create_prop("string", &format!("Source path. {}", MCP_PATH_GUIDANCE)));
     props.insert("destination".to_string(), create_prop("string", &format!("Destination path. {}", MCP_PATH_GUIDANCE)));
     let req = vec!["source".to_string(), "destination".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn get_file_info_mcp_schema() -> ToolInputSchema {
     let mut props = HashMap::new();
     props.insert("path".to_string(), create_prop("string", &format!("File/directory path. {}", MCP_PATH_GUIDANCE)));
     let req = vec!["path".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn read_multiple_files_mcp_schema() -> ToolInputSchema {
     let mut props = HashMap::new();
     props.insert("paths".to_string(), create_array_prop("string", &format!("Array of file paths. {}", MCP_PATH_GUIDANCE)));
     let req = vec!["paths".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn search_files_mcp_schema() -> ToolInputSchema {
@@ -100,7 +127,10 @@ pub fn search_files_mcp_schema() -> ToolInputSchema {
     props.insert("recursive".to_string(), create_prop_with_default_bool("boolean", "Search recursively.", true));
     props.insert("max_depth".to_string(), create_prop_with_default_int("integer", "Max recursion depth.", 10));
     let req = vec!["path".to_string(), "pattern".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 
@@ -119,7 +149,10 @@ pub fn search_code_mcp_schema() -> ToolInputSchema {
     props.insert("include_hidden".to_string(), create_prop_with_default_bool("boolean", "Search hidden files/dirs.", false));
     props.insert("timeoutMs".to_string(), json!({"type": "integer", "description": "Timeout in ms."}));
     let req = vec!["pattern".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn execute_command_mcp_schema() -> ToolInputSchema {
@@ -128,36 +161,48 @@ pub fn execute_command_mcp_schema() -> ToolInputSchema {
     props.insert("timeout_ms".to_string(), create_prop_with_default_int("integer", "Timeout for initial output (ms).", 1000));
     props.insert("shell".to_string(), json!({"type": "string", "description": "Specific shell (e.g., bash, powershell)."}));
     let req = vec!["command".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn force_terminate_mcp_schema() -> ToolInputSchema {
     let mut props = HashMap::new();
     props.insert("session_id".to_string(), create_prop("string", "ID of command session to terminate."));
     let req = vec!["session_id".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn list_sessions_mcp_schema() -> ToolInputSchema {
-    ToolInputSchema::new(vec![], None)
+    ToolInputSchema { required: vec![], input_schema: None }
 }
 
 pub fn read_session_output_status_mcp_schema() -> ToolInputSchema {
     let mut props = HashMap::new();
     props.insert("session_id".to_string(), create_prop("string", "ID of command session."));
     let req = vec!["session_id".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn list_processes_mcp_schema() -> ToolInputSchema {
-    ToolInputSchema::new(vec![], None)
+    ToolInputSchema { required: vec![], input_schema: None }
 }
 
 pub fn kill_process_mcp_schema() -> ToolInputSchema {
     let mut props = HashMap::new();
     props.insert("pid".to_string(), create_prop("integer", "Process ID (PID) to terminate."));
     let req = vec!["pid".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }
 
 pub fn edit_block_mcp_schema() -> ToolInputSchema {
@@ -167,5 +212,8 @@ pub fn edit_block_mcp_schema() -> ToolInputSchema {
     props.insert("new_string".to_string(), create_prop("string", "String to replace with."));
     props.insert("expected_replacements".to_string(), create_prop_with_default_int("integer", "Expected number of replacements (0 for all).", 1));
     let req = vec!["file_path".to_string(), "old_string".to_string(), "new_string".to_string()];
-    ToolInputSchema::new(req.clone(), build_mcp_schema(req, Some(props)))
+    ToolInputSchema {
+        required: req.clone(),
+        input_schema: build_mcp_schema(req, Some(props)),
+    }
 }

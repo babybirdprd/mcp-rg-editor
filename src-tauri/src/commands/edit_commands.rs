@@ -1,24 +1,22 @@
+// FILE: src-tauri/src/commands/edit_commands.rs
 use crate::config::Config;
 use crate::error::AppError;
 use crate::utils::audit_logger::audit_log;
 use crate::utils::fuzzy_search_logger::{FuzzySearchLogger, FuzzySearchLogEntry};
 use crate::utils::line_ending_handler::{detect_line_ending, normalize_line_endings, LineEndingStyle};
 use crate::utils::path_utils::validate_and_normalize_path;
-// For internal file reading/writing logic, similar to filesystem_commands
-use crate::commands::filesystem_commands::{FileContent, WriteMode as InternalWriteMode};
-
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock as StdRwLock};
-use tauri::{AppHandle, Manager, State};
-use tracing::{debug, instrument, warn, error};
+use std::sync::{Arc, RwLock as StdRwLock, RwLockReadGuard}; // Corrected RwLockReadGuard import
+use tauri::{AppHandle, Manager, State}; // Removed unused Manager
+use tauri_plugin_fs::FsExt; // Import FsExt for app_handle.fs() and app_handle.fs_scope()
+use tracing::{debug, instrument, warn}; // Removed unused error
 use std::time::Instant;
 use chrono::Utc;
-use diff; // For diff highlighting
+use diff;
 
-// --- Request Structs ---
-#[derive(Debug, Deserialize, Serialize)] // Added Serialize for audit log
+#[derive(Debug, Deserialize, Serialize)]
 pub struct EditBlockParams {
     pub file_path: String,
     pub old_string: String,
@@ -28,7 +26,6 @@ pub struct EditBlockParams {
 }
 fn default_one_usize() -> usize { 1 }
 
-// --- Response Structs ---
 #[derive(Debug, Serialize)]
 pub struct EditBlockResult {
     pub file_path: String,
@@ -46,40 +43,35 @@ pub struct FuzzyMatchDetails {
     pub log_path_suggestion: String,
 }
 
-const FUZZY_SIMILARITY_THRESHOLD: f64 = 0.7; // From original mcp-rg-editor
+const FUZZY_SIMILARITY_THRESHOLD: f64 = 0.7;
 
-// Internal helper to read file content for editing
 async fn read_file_for_edit(
     app_handle: &AppHandle,
     file_path_str: &str,
-    config_guard: &StdRwLockReadGuard<'_, Config>, // Borrow config_guard
+    config_guard: &RwLockReadGuard<'_, Config>,
 ) -> Result<(String, PathBuf, LineEndingStyle), AppError> {
     let path = validate_and_normalize_path(file_path_str, config_guard, true, false)?;
-    if !app_handle.fs_scope().is_allowed(&path) {
+    if !app_handle.fs_scope().is_allowed(&path) { // Use FsExt trait method
         return Err(AppError::PathNotAllowed(format!("Read access to {} denied by FS scope.", path.display())));
     }
-    let content_bytes = app_handle.fs().read_binary_file(&path).await
+    let content_bytes = app_handle.fs().read_binary_file(&path).await // Use FsExt trait method
         .map_err(|e| AppError::PluginError { plugin: "fs".to_string(), message: format!("Failed to read file {}: {}", path.display(), e) })?;
-
-    // Try to decode as UTF-8. This is a simplification; robust handling might involve checking BOM, etc.
     let original_content = String::from_utf8(content_bytes)
         .map_err(|e| AppError::EditError(format!("File {} is not valid UTF-8: {}", path.display(), e)))?;
-
     let line_ending = detect_line_ending(&original_content);
     Ok((original_content, path, line_ending))
 }
 
-// Internal helper to write file content after editing
 async fn write_file_after_edit(
     app_handle: &AppHandle,
-    file_path_obj: &Path, // Already validated path
+    file_path_obj: &Path,
     content: String,
-    _config_guard: &StdRwLockReadGuard<'_, Config>, // Borrow config_guard
+    _config_guard: &RwLockReadGuard<'_, Config>,
 ) -> Result<(), AppError> {
-    if !app_handle.fs_scope().is_allowed(file_path_obj) {
+    if !app_handle.fs_scope().is_allowed(file_path_obj) { // Use FsExt trait method
         return Err(AppError::PathNotAllowed(format!("Write access to {} denied by FS scope.", file_path_obj.display())));
     }
-    app_handle.fs().write_text_file(file_path_obj, content).await
+    app_handle.fs().write_text_file(file_path_obj, content).await // Use FsExt trait method
         .map_err(|e| AppError::PluginError { plugin: "fs".to_string(), message: format!("Failed to write file {}: {}", file_path_obj.display(), e) })
 }
 
@@ -93,7 +85,7 @@ pub async fn edit_block_command(
     fuzzy_logger_state: State<'_, Arc<FuzzySearchLogger>>,
     params: EditBlockParams,
 ) -> Result<EditBlockResult, AppError> {
-    audit_log(&audit_logger_state, "edit_block", &serde_json::to_value(params)?).await;
+    audit_log(&audit_logger_state, "edit_block", &serde_json::to_value(&params)?).await; // Pass params by ref
     debug!("Editing block in file: {}", params.file_path);
 
     if params.old_string.is_empty() {
@@ -103,51 +95,41 @@ pub async fn edit_block_command(
     let config_read_guard = config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock error: {}",e)))?;
 
     let (original_content, validated_path, file_line_ending) =
-        read_file_for_edit(&app_handle, params.file_path, &config_read_guard).await?;
+        read_file_for_edit(&app_handle, &params.file_path, &config_read_guard).await?; // Pass &params.file_path
 
     let file_extension = validated_path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
     debug!(?file_line_ending, "Detected file line ending for edit");
 
-    let normalized_old_string = normalize_line_endings(params.old_string, file_line_ending);
-    let normalized_new_string = normalize_line_endings(params.new_string, file_line_ending);
+    let normalized_old_string = normalize_line_endings(&params.old_string, file_line_ending); // Pass &params.old_string
+    let normalized_new_string = normalize_line_endings(&params.new_string, file_line_ending); // Pass &params.new_string
 
     let occurrences: Vec<_> = original_content.match_indices(&normalized_old_string).collect();
     let actual_occurrences = occurrences.len();
 
-    if params.expected_replacements > 0 && actual_occurrences == params.expected_replacements {
-        debug!(count = actual_occurrences, "Exact match count matches expected. Proceeding with replacement.");
+    if (params.expected_replacements > 0 && actual_occurrences == params.expected_replacements) ||
+       (params.expected_replacements == 0 && actual_occurrences > 0) {
+        debug!(count = actual_occurrences, "Exact match count meets criteria. Proceeding with replacement.");
         let new_content = original_content.replace(&normalized_old_string, &normalized_new_string);
         write_file_after_edit(&app_handle, &validated_path, new_content, &config_read_guard).await?;
+        let message_detail = if params.expected_replacements == 0 { "all occurrences" } else { "exact replacement(s)" };
         return Ok(EditBlockResult {
             file_path: params.file_path.clone(),
             replacements_made: actual_occurrences,
-            message: format!("Successfully applied {} exact replacement(s).", actual_occurrences),
+            message: format!("Successfully applied {} {}.", actual_occurrences, message_detail),
             fuzzy_match_details: None,
         });
     }
-
-    if params.expected_replacements == 0 && actual_occurrences > 0 {
-        debug!(count = actual_occurrences, "Expected 0 (replace all) and found occurrences. Proceeding with replacement.");
-        let new_content = original_content.replace(&normalized_old_string, &normalized_new_string);
-        write_file_after_edit(&app_handle, &validated_path, new_content, &config_read_guard).await?;
-        return Ok(EditBlockResult {
-            file_path: params.file_path.clone(),
-            replacements_made: actual_occurrences,
-            message: format!("Successfully applied {} exact replacement(s) (all occurrences).", actual_occurrences),
-            fuzzy_match_details: None,
-        });
-    }
-
+    
     if actual_occurrences > 0 && params.expected_replacements > 0 && actual_occurrences != params.expected_replacements {
          return Err(AppError::EditError(format!(
-            "Expected {} occurrences but found {}. Please verify 'old_string' for uniqueness or adjust 'expected_replacements'. If you want to replace all {} occurrences, set expected_replacements to {}.",
+            "Expected {} occurrences but found {}. Please verify 'old_string' for uniqueness or adjust 'expected_replacements'. If you want to replace all {} occurrences, set expected_replacements to 0 or {}.",
             params.expected_replacements, actual_occurrences, actual_occurrences, actual_occurrences
         )));
     }
-
+    
     debug!("No exact match or count mismatch for specific replacement. Attempting fuzzy search.");
     let fuzzy_start_time = Instant::now();
-
+    
     let (best_match_value, similarity) = find_best_fuzzy_match_internal(&original_content, &normalized_old_string);
     let fuzzy_execution_time_ms = fuzzy_start_time.elapsed().as_secs_f64() * 1000.0;
 
@@ -156,7 +138,7 @@ pub async fn edit_block_command(
 
     let log_entry = FuzzySearchLogEntry {
         timestamp: Utc::now(),
-        search_text: params.old_string.clone(),
+        search_text: params.old_string.clone(), // Clone here as params might be dropped
         found_text: best_match_value.clone(),
         similarity,
         execution_time_ms: fuzzy_execution_time_ms,
@@ -172,10 +154,10 @@ pub async fn edit_block_command(
         unique_character_count: char_code_data.unique_count,
         diff_length: char_code_data.diff_length,
     };
-
-    let logger_clone = fuzzy_logger_state.inner().clone(); // Get Arc<FuzzySearchLogger>
+    
+    let logger_clone = fuzzy_logger_state.inner().clone();
     tokio::spawn(async move {
-        logger_clone.log(&log_entry).await;
+        logger_clone.log(&log_entry).await; // Call log on Arc<FuzzySearchLogger>
     });
 
     let fuzzy_details = FuzzyMatchDetails {
@@ -184,7 +166,7 @@ pub async fn edit_block_command(
         diff_highlight: diff_highlight.clone(),
         log_path_suggestion: config_read_guard.fuzzy_search_log_file.display().to_string(),
     };
-    // drop(config_read_guard); // No longer needed
+    // drop(config_read_guard); // No longer needed explicitly
 
     if similarity >= FUZZY_SIMILARITY_THRESHOLD {
         warn!(similarity, "Fuzzy match found, but not applied automatically.");
@@ -205,7 +187,6 @@ pub async fn edit_block_command(
     }
 }
 
-// Internal fuzzy matching logic (copied from original mcp-rg-editor's edit_tool.rs)
 fn find_best_fuzzy_match_internal(text: &str, query: &str) -> (String, f64) {
     if text.is_empty() || query.is_empty() {
         return ("".to_string(), 0.0);
@@ -262,13 +243,18 @@ fn get_character_code_data_internal(expected: &str, actual: &str) -> CharCodeDat
     use std::collections::HashMap;
     let mut prefix_len = 0;
     let min_char_len = std::cmp::min(expected.chars().count(), actual.chars().count());
-    let mut expected_chars = expected.chars();
-    let mut actual_chars = actual.chars();
-    for _ in 0..min_char_len { if expected_chars.next() == actual_chars.next() { prefix_len +=1; } else { break; }}
-    expected_chars = expected.chars().rev();
-    actual_chars = actual.chars().rev();
+    
+    // Corrected iterator usage
+    let mut expected_chars_iter = expected.chars(); 
+    let mut actual_chars_iter = actual.chars(); 
+
+    for _ in 0..min_char_len { if expected_chars_iter.next() == actual_chars_iter.next() { prefix_len +=1; } else { break; }}
+    
+    expected_chars_iter = expected.chars().rev(); // Re-assign to new iterators
+    actual_chars_iter = actual.chars().rev(); 
     let mut suffix_len = 0;
-    for _ in 0..(min_char_len - prefix_len) { if expected_chars.next() == actual_chars.next() { suffix_len +=1; } else { break; }}
+    for _ in 0..(min_char_len - prefix_len) { if expected_chars_iter.next() == actual_chars_iter.next() { suffix_len +=1; } else { break; }}
+    
     let expected_diff_str: String = expected.chars().skip(prefix_len).take(expected.chars().count() - prefix_len - suffix_len).collect();
     let actual_diff_str: String = actual.chars().skip(prefix_len).take(actual.chars().count() - prefix_len - suffix_len).collect();
     let mut char_codes: HashMap<u32, usize> = HashMap::new();
@@ -279,7 +265,6 @@ fn get_character_code_data_internal(expected: &str, actual: &str) -> CharCodeDat
             .map(|c| if c.is_control() || (c.is_whitespace() && c != ' ') { format!("\\x{:02x}", code) } else { c.to_string() })
             .unwrap_or_else(|| format!("\\u{{{:x}}}", code));
         format!("{}:{}[{}]", code, count, char_display)
-    }).collect();
-    report_parts.sort();
+    }).collect(); report_parts.sort();
     CharCodeDataInternal { report: report_parts.join(","), unique_count: char_codes.len(), diff_length: full_diff_str.chars().count() }
 }

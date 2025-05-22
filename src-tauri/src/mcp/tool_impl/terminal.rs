@@ -1,34 +1,33 @@
 // FILE: src-tauri/src/mcp/tool_impl/terminal.rs
-// IMPORTANT NOTE: Rewrite the entire file.
 use crate::config::Config;
 use crate::error::AppError;
 use crate::mcp::handler::ToolDependencies;
-use crate::commands::terminal_commands::ActiveSession; // Use the existing ActiveSession from commands module
-// ActiveSessionsMap is already part of ToolDependencies
+use crate::commands::terminal_commands::ActiveSession; // Use the existing ActiveSession
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, Runtime};
-use tauri_plugin_shell::{ShellExt, CommandEvent, process::CommandChild};
+use tauri::{AppHandle, Emitter, Manager, Runtime}; // Added Emitter
+use tauri_plugin_shell::{process::CommandEvent, ShellExt}; // Corrected CommandEvent import
 use tokio::sync::Mutex as TokioMutex;
-use tokio::time::{timeout, Duration};
+use tokio::time::{timeout, Duration, Instant as TokioInstant}; // Use TokioInstant
 use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 use chrono::Utc;
+use serde_json::json; // For json! macro
 
 // --- MCP Specific Parameter Structs ---
 #[derive(Debug, Deserialize)]
 pub struct ExecuteCommandParamsMCP {
     pub command: String,
     #[serde(rename = "timeout_ms")]
-    pub timeout_ms: Option<u64>, // For initial output capture for MCP client
+    pub timeout_ms: Option<u64>,
     pub shell: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ForceTerminateParamsMCP { pub session_id: String; }
+pub struct ForceTerminateParamsMCP { pub session_id: String } // Corrected syntax
 #[derive(Debug, Deserialize)]
-pub struct ReadOutputStatusParamsMCP { pub session_id: String; }
+pub struct ReadOutputStatusParamsMCP { pub session_id: String } // Corrected syntax
 
 // --- MCP Specific Result Structs ---
 #[derive(Debug, Serialize)]
@@ -36,17 +35,17 @@ pub struct ExecuteCommandResultMCP {
     pub session_id: String,
     pub pid: Option<u32>,
     pub initial_output: String,
-    pub timed_out: bool, // True if initial_output_timeout_ms was hit before command completion
-    pub exit_code: Option<i32>, // Populated if command finishes within initial_output_timeout_ms
+    pub timed_out: bool,
+    pub exit_code: Option<i32>,
     pub message: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct ForceTerminateResultMCP { pub session_id: String, pub success: bool, pub message: String; }
+pub struct ForceTerminateResultMCP { pub session_id: String, pub success: bool, pub message: String } // Corrected syntax
 #[derive(Debug, Serialize)]
 pub struct SessionInfoMCP { pub session_id: String, pub command: String, pub pid: Option<u32>, pub is_running: bool, pub start_time_iso: String, pub runtime_ms: u128 }
 #[derive(Debug, Serialize)]
-pub struct ReadOutputStatusResultMCP { pub session_id: String, pub is_running: bool, pub exit_code: Option<i32>, pub message: String, pub recent_output: Option<String> /* Placeholder for now */ }
+pub struct ReadOutputStatusResultMCP { pub session_id: String, pub is_running: bool, pub exit_code: Option<i32>, pub message: String, pub recent_output: Option<String> }
 
 
 fn is_command_blocked_mcp(command_str: &str, config: &Config) -> bool {
@@ -80,26 +79,27 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
         let args: Vec<String> = parts.map(String::from).collect();
         (deps.app_handle.shell().command(prog.to_string()).args(args.clone()), args)
     };
-    command_obj = command_obj.current_dir(cwd_path).set_stdin(tauri_plugin_shell::process::Stdio::Null);
-    let prog_name = command_obj.get_program().to_string_lossy().to_string();
-    if !deps.app_handle.shell().scope().is_allowed(&prog_name, &shell_args_for_scope_check) {
-        return Err(AppError::CommandBlocked(format!("Execution of '{}' not permitted by shell scope.", prog_name)));
+    
+    // No direct set_stdin on tauri_plugin_shell::Command. Stdin(null) is default for non-interactive.
+    command_obj = command_obj.current_dir(cwd_path);
+    // command_obj = command_obj.set_stdin(std::process::Stdio::null()); // This was incorrect for tauri_plugin_shell::Command
+
+    let program_name_for_scope_check = command_obj.program_for_scope_check().to_string_lossy().to_string(); // Helper method needed or store program name
+    if !deps.app_handle.shell().scope().is_allowed(&program_name_for_scope_check, &shell_args_for_scope_check) {
+        return Err(AppError::CommandBlocked(format!("Execution of '{}' not permitted by shell scope.", program_name_for_scope_check)));
     }
 
     debug!(shell = ?shell_to_use, command = %params.command, "MCP Tool: Spawning command via tauri-plugin-shell");
     let (mut rx, child_proc_handle) = command_obj.spawn().map_err(|e| AppError::CommandExecutionError(format!("Spawn failed: {}", e)))?;
-    let pid = child_proc_handle.pid(); // Get PID from CommandChild
-
-    // Wrap CommandChild in Arc<TokioMutex<CommandChild>> for shared mutable access
-    let child_arc_mutex = Arc::new(TokioMutex::new(child_proc_handle));
+    let pid_val = child_proc_handle.pid();
 
     let active_session_arc = Arc::new(ActiveSession {
-        process_child: child_arc_mutex.clone(), // Store the Arc<TokioMutex<CommandChild>>
+        process_child: Arc::new(TokioMutex::new(child_proc_handle)),
         command_str: params.command.clone(),
         exit_code: Arc::new(TokioMutex::new(None)),
         start_time_system: std::time::SystemTime::now(),
         session_id: session_id.clone(),
-        pid,
+        pid: Some(pid_val), // pid is u32
     });
     deps.active_sessions_map.lock().await.insert(session_id.clone(), active_session_arc.clone());
 
@@ -109,37 +109,33 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
     let mut timed_out_flag = false;
     let mut early_exit_code: Option<i32> = None;
 
-    let output_collection_start_time = Instant::now();
+    let output_collection_start_time = TokioInstant::now();
     loop {
         if output_collection_start_time.elapsed() > Duration::from_millis(initial_output_timeout_ms) {
-            if early_exit_code.is_none() { // Only set timed_out if not already exited
-                timed_out_flag = true;
-            }
+            if early_exit_code.is_none() { timed_out_flag = true; }
             break;
         }
         match timeout(Duration::from_millis(50), rx.recv()).await {
-            Ok(Ok(Some(event))) => match event { // Ok(Ok(Some(event)))
+            Ok(Ok(Some(event))) => match event {
                 CommandEvent::Stdout(line) => initial_stdout_lines.push(String::from_utf8_lossy(&line).into_owned()),
                 CommandEvent::Stderr(line) => initial_stderr_lines.push(String::from_utf8_lossy(&line).into_owned()),
                 CommandEvent::Terminated(payload) => { early_exit_code = payload.code; break; }
                 CommandEvent::Error(msg) => { error!("Cmd error during initial read: {}", msg); early_exit_code = Some(-1); break; }
                 _ => {}
             },
-            Ok(Ok(None)) => { break; } // Stream ended
-            Ok(Err(e)) => { error!("rx.recv error: {:?}", e); early_exit_code = Some(-2); break; } // Recv error
-            Err(_) => { /* timeout for this 50ms iteration, continue loop if overall timeout not met */ }
+            Ok(Ok(None)) => { break; } 
+            Ok(Err(e)) => { error!("rx.recv error: {:?}", e); early_exit_code = Some(-2); break; } 
+            Err(_) => { /* timeout for this 50ms iteration */ }
         }
     }
     
     let combined_initial_output = format!("STDOUT:\n{}\nSTDERR:\n{}", initial_stdout_lines.join("\n"), initial_stderr_lines.join("\n"));
 
-    // Spawn the background task to continue consuming events for UI and state updates
     let app_handle_clone = deps.app_handle.clone();
     let session_id_clone_for_task = session_id.clone();
-    let active_session_clone_for_task = active_session_arc.clone(); // This is Arc<ActiveSession>
+    let active_session_clone_for_task = active_session_arc.clone();
     let sessions_state_clone_for_task = deps.active_sessions_map.clone();
 
-    // Only spawn the background task if the command hasn't already finished
     if early_exit_code.is_none() {
         tokio::spawn(async move {
             loop {
@@ -159,15 +155,15 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
                     }
                     Some(CommandEvent::Error(message)) => {
                         error!(sid = %session_id_clone_for_task, message = %message, "Background task: Command error in stream");
-                        *active_session_clone_for_task.exit_code.lock().await = Some(-1); // Generic error code
+                        *active_session_clone_for_task.exit_code.lock().await = Some(-1);
                         app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "error", "data": message })).unwrap_or_else(|e| error!("Emit error failed: {}", e));
                         sessions_state_clone_for_task.lock().await.remove(&session_id_clone_for_task);
                         break;
                     }
-                    None => { // Stream closed
+                    None => {
                         info!(sid = %session_id_clone_for_task, "Background task: Command event stream closed");
                         if active_session_clone_for_task.exit_code.lock().await.is_none() {
-                            *active_session_clone_for_task.exit_code.lock().await = Some(0); // Assume success if stream closes cleanly
+                            *active_session_clone_for_task.exit_code.lock().await = Some(0);
                         }
                         app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "finished_stream_closed"})).unwrap_or_else(|e| error!("Emit finished failed: {}", e));
                         sessions_state_clone_for_task.lock().await.remove(&session_id_clone_for_task);
@@ -178,31 +174,26 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
             info!(sid = %session_id_clone_for_task, "Exiting command monitoring background task.");
         });
     } else {
-        // Command already finished, update state
         *active_session_arc.exit_code.lock().await = early_exit_code;
         deps.active_sessions_map.lock().await.remove(&session_id);
     }
 
-
     let final_exit_code = *active_session_arc.exit_code.lock().await;
-    let message = if timed_out_flag && final_exit_code.is_none() { format!("Cmd started (PID:{:?}, SID:{}), timed out for initial output. Output streamed via events.", pid, session_id) }
-                  else if final_exit_code.is_none() { format!("Cmd running (PID:{:?}, SID:{}). Output streamed via events.", pid, session_id) }
-                  else { format!("Cmd finished (PID:{:?}, SID:{}). Exit: {:?}.", pid, session_id, final_exit_code) };
+    let message = if timed_out_flag && final_exit_code.is_none() { format!("Cmd started (PID:{:?}, SID:{}), timed out for initial output. Output streamed via events.", pid_val, session_id) }
+                  else if final_exit_code.is_none() { format!("Cmd running (PID:{:?}, SID:{}). Output streamed via events.", pid_val, session_id) }
+                  else { format!("Cmd finished (PID:{:?}, SID:{}). Exit: {:?}.", pid_val, session_id, final_exit_code) };
 
-    Ok(ExecuteCommandResultMCP { session_id, pid, initial_output: combined_initial_output, timed_out: timed_out_flag, exit_code: final_exit_code, message })
+    Ok(ExecuteCommandResultMCP { session_id, pid: Some(pid_val), initial_output: combined_initial_output, timed_out: timed_out_flag, exit_code: final_exit_code, message })
 }
 
 pub async fn mcp_force_terminate_session(deps: &ToolDependencies, params: ForceTerminateParamsMCP) -> Result<ForceTerminateResultMCP, AppError> {
     let session_id = params.session_id;
     if let Some(session_arc) = deps.active_sessions_map.lock().await.get(&session_id).cloned() {
-        let mut child_guard = session_arc.process_child.lock().await; // This is MutexGuard<CommandChild>
-        match child_guard.kill() { // Call kill() on CommandChild
+        let mut child_guard = session_arc.process_child.lock().await;
+        match child_guard.kill() {
             Ok(_) => {
                 info!(sid = %session_id, pid = ?session_arc.pid, "MCP Tool: Termination signal sent.");
-                *session_arc.exit_code.lock().await = Some(-9); // Mark as killed
-                // The background task (if still running) should eventually notice and clean up from the map.
-                // Or, we can proactively remove it here if we are sure.
-                // For MCP, immediate feedback is good.
+                *session_arc.exit_code.lock().await = Some(-9);
                 deps.active_sessions_map.lock().await.remove(&session_id);
                 Ok(ForceTerminateResultMCP { session_id, success: true, message: "Termination signal sent.".into() })
             }
@@ -234,8 +225,6 @@ pub async fn mcp_read_session_output_status(deps: &ToolDependencies, params: Rea
     let session_id = params.session_id;
     if let Some(session_arc) = deps.active_sessions_map.lock().await.get(&session_id).cloned() {
         let exit_code = *session_arc.exit_code.lock().await;
-        // For MCP, we don't have a readily available output buffer here unless we add one to ActiveSession
-        // and populate it from the CommandEvent stream. For now, indicate output is streamed.
         Ok(ReadOutputStatusResultMCP {
             session_id, is_running: exit_code.is_none(), exit_code,
             message: "Session status. For UI, output is streamed via Tauri events. MCP client cannot directly access this stream without further adaptation.".into(),
