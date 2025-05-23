@@ -45,19 +45,6 @@
     },
     "shell": {
       "open": true
-    },
-    "process": {},
-    "dialog": null,
-    "notification": {},
-    "log": {
-      "targets": [
-        {"name": "stdout", "level": "info"}, 
-        {"name": "logdir", "level": "debug", "path": "$APPLOG"}, 
-        {"name": "webview", "level": "info"}
-      ],
-      "maxSize": 5242880, 
-      "rotationStrategy": "KeepOne", 
-      "level": "info" 
     }
   }
 }
