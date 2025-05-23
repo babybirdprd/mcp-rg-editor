@@ -2,356 +2,52 @@ Parsed Rust Compiler Output:
 
 --- Message 1 ---
 Level: error
-Message: unresolved imports `rust_mcp_schema::Content`, `rust_mcp_schema::RpcErrorCode`
+Message: unresolved import `rust_mcp_schema::RpcErrorCodes`
 File: src-tauri\src\mcp\handler.rs
-Location: Line 14, Column 79
-Label: no `Content` in the root
-Code Context:     CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content, // Content should now be resolved
-  help: a similar name exists in the module
-    Suggestion: RpcError
+Location: Line 18, Column 5
+Label: no `RpcErrorCodes` in the root
+Code Context:     RpcErrorCodes,             // Enum for standard RPC error codes
+  help: consider importing this enum instead:
+rust_mcp_schema::schema_utils::RpcErrorCodes
 Full Rendered Output:
-error[E0432]: unresolved imports `rust_mcp_schema::Content`, `rust_mcp_schema::RpcErrorCode`
-  --> src-tauri\src\mcp\handler.rs:14:79
+error[E0432]: unresolved import `rust_mcp_schema::RpcErrorCodes`
+  --> src-tauri\src\mcp\handler.rs:18:5
    |
-14 |     CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool, Content, // Content should now be resolved
-   |                                                                               ^^^^^^^ no `Content` in the root
-15 |     schema_utils::CallToolError, RpcError, RpcErrorCode, // RpcErrorCode should now be resolved
-   |                                            ^^^^^^^^^^^^
-   |                                            |
-   |                                            no `RpcErrorCode` in the root
-   |                                            help: a similar name exists in the module: `RpcError`
+18 |     RpcErrorCodes,             // Enum for standard RPC error codes
+   |     ^^^^^^^^^^^^^ no `RpcErrorCodes` in the root
+   |
+   = help: consider importing this enum instead:
+           rust_mcp_schema::schema_utils::RpcErrorCodes
 
 
 
 
 --- Message 2 ---
 Level: error
-Message: unresolved imports `tauri_plugin_fs::DirEntry`, `tauri_plugin_fs::DirOptions`, `tauri_plugin_fs::FileOptions`, `tauri_plugin_fs::Metadata`
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 10, Column 23
-Label: no `DirEntry` in the root
-Code Context: use tauri_plugin_fs::{DirEntry, FilePath, FsExt, DirOptions, FileOptions, Metadata as FsMetadata};
-  help: consider importing one of these structs instead:
-std::fs::DirEntry
-tokio::fs::DirEntry
-  help: consider importing one of these structs instead:
-std::fs::Metadata
-log::Metadata
-tracing::Metadata
+Message: no method named `read_text_file` found for reference `&AppHandle` in the current scope
+File: src-tauri\src\mcp\tool_impl\edit.rs
+Location: Line 68, Column 39
+Label: method not found in `&AppHandle`
+Code Context:     let original_content = app_handle.read_text_file(FilePath::Path(path.clone()), None)
 Full Rendered Output:
-error[E0432]: unresolved imports `tauri_plugin_fs::DirEntry`, `tauri_plugin_fs::DirOptions`, `tauri_plugin_fs::FileOptions`, `tauri_plugin_fs::Metadata`
-  --> src-tauri\src\mcp\tool_impl\filesystem.rs:10:23
+error[E0599]: no method named `read_text_file` found for reference `&AppHandle` in the current scope
+  --> src-tauri\src\mcp\tool_impl\edit.rs:68:39
    |
-10 | use tauri_plugin_fs::{DirEntry, FilePath, FsExt, DirOptions, FileOptions, Metadata as FsMetadata};
-   |                       ^^^^^^^^                   ^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^^^^^^^^^^^ no `Metadata` in the root
-   |                       |                          |           |
-   |                       |                          |           no `FileOptions` in the root
-   |                       |                          no `DirOptions` in the root
-   |                       no `DirEntry` in the root
-   |
-   = help: consider importing one of these structs instead:
-           std::fs::DirEntry
-           tokio::fs::DirEntry
-   = help: consider importing one of these structs instead:
-           std::fs::Metadata
-           log::Metadata
-           tracing::Metadata
+68 |     let original_content = app_handle.read_text_file(FilePath::Path(path.clone()), None)
+   |                                       ^^^^^^^^^^^^^^ method not found in `&AppHandle`
 
 
 
 
 --- Message 3 ---
 Level: error
-Message: unresolved import `tauri_plugin_fs::FileOptions`
-File: src-tauri\src\mcp\tool_impl\edit.rs
-Location: Line 10, Column 40
-Label: no `FileOptions` in the root
-Code Context: use tauri_plugin_fs::{FilePath, FsExt, FileOptions};
-Full Rendered Output:
-error[E0432]: unresolved import `tauri_plugin_fs::FileOptions`
-  --> src-tauri\src\mcp\tool_impl\edit.rs:10:40
-   |
-10 | use tauri_plugin_fs::{FilePath, FsExt, FileOptions};
-   |                                        ^^^^^^^^^^^ no `FileOptions` in the root
-
-
-
-
---- Message 4 ---
-Level: error
-Message: no method named `read_binary_file` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 157, Column 37
-Label: method not found in `AppHandle`
-Code Context:         let bytes = deps.app_handle.read_binary_file(FilePath::Path(path)) // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `read_binary_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:157:37
-    |
-157 |         let bytes = deps.app_handle.read_binary_file(FilePath::Path(path)) // MODIFIED
-    |                                     ^^^^^^^^^^^^^^^^ method not found in `AppHandle`
-
-
-
-
---- Message 5 ---
-Level: error
-Message: no method named `read_text_file` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 161, Column 44
-Label: method not found in `AppHandle`
-Code Context:         let full_content = deps.app_handle.read_text_file(FilePath::Path(path)) // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `read_text_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:161:44
-    |
-161 |         let full_content = deps.app_handle.read_text_file(FilePath::Path(path)) // MODIFIED
-    |                                            ^^^^^^^^^^^^^^ method not found in `AppHandle`
-
-
-
-
---- Message 6 ---
-Level: error
-Message: no method named `exists` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 189, Column 87
-Code Context:     let final_content_str = if params.mode == WriteModeMCP::Append && deps.app_handle.exists(FilePath::Path(path.clone())).unwrap_or(false) { // MODIFIED
-  help: there is a method `exit` with a similar name
-    Suggestion: exit
-Full Rendered Output:
-error[E0599]: no method named `exists` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:189:87
-    |
-189 |     let final_content_str = if params.mode == WriteModeMCP::Append && deps.app_handle.exists(FilePath::Path(path.clone())).unwrap_o...
-    |                                                                                       ^^^^^^
-    |
-help: there is a method `exit` with a similar name
-    |
-189 -     let final_content_str = if params.mode == WriteModeMCP::Append && deps.app_handle.exists(FilePath::Path(path.clone())).unwrap_or(false) { // MODIFIED
-189 +     let final_content_str = if params.mode == WriteModeMCP::Append && deps.app_handle.exit(FilePath::Path(path.clone())).unwrap_or(false) { // MODIFIED
-    |
-
-
-
-
---- Message 7 ---
-Level: error
-Message: no method named `read_text_file` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 190, Column 52
-Label: method not found in `AppHandle`
-Code Context:         let existing_content_str = deps.app_handle.read_text_file(FilePath::Path(path.clone())).unwrap_or_default(); // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `read_text_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:190:52
-    |
-190 |         let existing_content_str = deps.app_handle.read_text_file(FilePath::Path(path.clone())).unwrap_or_default(); // MODIFIED
-    |                                                    ^^^^^^^^^^^^^^ method not found in `AppHandle`
-
-
-
-
---- Message 8 ---
-Level: error
-Message: no method named `write_text_file` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 201, Column 21
-Label: method not found in `AppHandle`
-Code Context:     deps.app_handle.write_text_file(FilePath::Path(path.clone()), final_content_str, Some(fs_options)) // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `write_text_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:201:21
-    |
-201 |     deps.app_handle.write_text_file(FilePath::Path(path.clone()), final_content_str, Some(fs_options)) // MODIFIED
-    |                     ^^^^^^^^^^^^^^^ method not found in `AppHandle`
-
-
-
-
---- Message 9 ---
-Level: error
-Message: no method named `create_dir` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 212, Column 21
-Label: method not found in `AppHandle`
-Code Context:     deps.app_handle.create_dir(FilePath::Path(path), Some(DirOptions { recursive: Some(true), base_dir: None })) // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `create_dir` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:212:21
-    |
-212 |     deps.app_handle.create_dir(FilePath::Path(path), Some(DirOptions { recursive: Some(true), base_dir: None })) // MODIFIED
-    |                     ^^^^^^^^^^ method not found in `AppHandle`
-
-
-
-
---- Message 10 ---
-Level: error
-Message: no method named `read_dir` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 222, Column 40
-Label: method not found in `AppHandle`
-Code Context:     let entries_data = deps.app_handle.read_dir(FilePath::Path(path), Some(DirOptions { recursive: Some(false), base_dir: None })) // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `read_dir` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:222:40
-    |
-222 |     let entries_data = deps.app_handle.read_dir(FilePath::Path(path), Some(DirOptions { recursive: Some(false), base_dir: None })) ...
-    |                                        ^^^^^^^^ method not found in `AppHandle`
-
-
-
-
---- Message 11 ---
-Level: error
-Message: no method named `rename_file` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 235, Column 21
-Label: method not found in `AppHandle`
-Code Context:     deps.app_handle.rename_file(FilePath::Path(source_path), FilePath::Path(dest_path)) // MODIFIED (rename -> rename_file)
-Full Rendered Output:
-error[E0599]: no method named `rename_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:235:21
-    |
-235 |     deps.app_handle.rename_file(FilePath::Path(source_path), FilePath::Path(dest_path)) // MODIFIED (rename -> rename_file)
-    |                     ^^^^^^^^^^^ method not found in `AppHandle`
-
-
-
-
---- Message 12 ---
-Level: error
-Message: no method named `metadata` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 246, Column 51
-Label: method not found in `AppHandle`
-Code Context:     let fs_metadata: FsMetadata = deps.app_handle.metadata(FilePath::Path(path.clone())) // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `metadata` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:246:51
-    |
-246 |     let fs_metadata: FsMetadata = deps.app_handle.metadata(FilePath::Path(path.clone())) // MODIFIED
-    |                                                   ^^^^^^^^ method not found in `AppHandle`
-
-
-
-
---- Message 13 ---
-Level: error
-Message: no method named `read_binary_file` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 296, Column 45
-Label: method not found in `AppHandle`
-Code Context:                             deps.app_handle.read_binary_file(FilePath::Path(val_path)) // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `read_binary_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:296:45
-    |
-296 | ...                   deps.app_handle.read_binary_file(FilePath::Path(val_path)) // MODIFIED
-    |                                       ^^^^^^^^^^^^^^^^ method not found in `AppHandle`
-
-
-
-
---- Message 14 ---
-Level: error
-Message: no method named `read_text_file` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 300, Column 45
-Label: method not found in `AppHandle`
-Code Context:                             deps.app_handle.read_text_file(FilePath::Path(val_path)) // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `read_text_file` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:300:45
-    |
-300 | ...                   deps.app_handle.read_text_file(FilePath::Path(val_path)) // MODIFIED
-    |                                       ^^^^^^^^^^^^^^ method not found in `AppHandle`
-
-
-
-
---- Message 15 ---
-Level: error
-Message: no method named `read_dir` found for reference `&AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 339, Column 41
-Label: method not found in `&AppHandle`
-Code Context:     let dir_entries_result = app_handle.read_dir(FilePath::Path(dir_to_search.clone()), Some(DirOptions { recursive: Some(false), base_dir: None })); // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `read_dir` found for reference `&AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:339:41
-    |
-339 |     let dir_entries_result = app_handle.read_dir(FilePath::Path(dir_to_search.clone()), Some(DirOptions { recursive: Some(false), b...
-    |                                         ^^^^^^^^ method not found in `&AppHandle`
-
-
-
-
---- Message 16 ---
-Level: error
-Message: no method named `read_dir` found for struct `AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\filesystem.rs
-Location: Line 397, Column 48
-Label: method not found in `AppHandle`
-Code Context:             let dir_entries = app_handle_clone.read_dir(FilePath::Path(root_search_path), Some(DirOptions { recursive: Some(false), base_dir: None })) // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `read_dir` found for struct `AppHandle` in the current scope
-   --> src-tauri\src\mcp\tool_impl\filesystem.rs:397:48
-    |
-397 | ...   let dir_entries = app_handle_clone.read_dir(FilePath::Path(root_search_path), Some(DirOptions { recursive: Some(false), base_...
-    |                                          ^^^^^^^^ method not found in `AppHandle`
-
-
-
-
---- Message 17 ---
-Level: error
-Message: no method named `read_text_file` found for reference `&AppHandle` in the current scope
-File: src-tauri\src\mcp\tool_impl\edit.rs
-Location: Line 55, Column 39
-Label: method not found in `&AppHandle`
-Code Context:     let original_content = app_handle.read_text_file(FilePath::Path(path.clone())) // MODIFIED
-Full Rendered Output:
-error[E0599]: no method named `read_text_file` found for reference `&AppHandle` in the current scope
-  --> src-tauri\src\mcp\tool_impl\edit.rs:55:39
-   |
-55 |     let original_content = app_handle.read_text_file(FilePath::Path(path.clone())) // MODIFIED
-   |                                       ^^^^^^^^^^^^^^ method not found in `&AppHandle`
-
-
-
-
---- Message 18 ---
-Level: error
 Message: no method named `write_text_file` found for reference `&AppHandle` in the current scope
 File: src-tauri\src\mcp\tool_impl\edit.rs
-Location: Line 69, Column 16
-Label: method not found in `&AppHandle`
-Code Context:     app_handle.write_text_file(FilePath::Path(path_obj.clone()), content, Some(FileOptions { append: Some(false), base_dir: None })) // MODIFIED
+Location: Line 89, Column 5
+Code Context:     app_handle.write_text_file(
 Full Rendered Output:
 error[E0599]: no method named `write_text_file` found for reference `&AppHandle` in the current scope
-  --> src-tauri\src\mcp\tool_impl\edit.rs:69:16
+  --> src-tauri\src\mcp\tool_impl\edit.rs:89:16
    |
-69 |     app_handle.write_text_file(FilePath::Path(path_obj.clone()), content, Some(FileOptions { append: Some(false), base_dir: None }))...
-   |                ^^^^^^^^^^^^^^^ method not found in `&AppHandle`
-
-
-
-
---- Message 19 ---
-Level: failure-note
-Message: Some errors have detailed explanations: E0432, E0599.
-Full Rendered Output:
-Some errors have detailed explanations: E0432, E0599.
-
-
-
---- Message 20 ---
-Level: failure-note
-Message: For more information about an error, try `rustc --explain E0432`.
-Full Rendered Output:
-For more information about an error, try `rustc --explain E0432`.
-
-
-
+89 |     app_handle.write_text_file(
+   |     -----------^^^^^^^^^^^^^^^ method not found in `&AppHandle`

@@ -7,9 +7,12 @@ use crate::utils::path_utils::validate_and_normalize_path;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-// MODIFIED: Assuming these types are at the root of tauri_plugin_fs.
-use tauri_plugin_fs::{FilePath, FsExt, FileOptions};
-use tracing::{debug, instrument};
+// MODIFIED: FsExt is needed for fs_scope(). Removed FilePath as tokio::fs uses Path/PathBuf.
+use tauri_plugin_fs::FsExt;
+use tokio::fs as tokio_fs; // For async file operations
+#[allow(unused_imports)] // May not be needed if only using read_to_string and write
+use tokio::io::{AsyncReadExt, AsyncWriteExt}; 
+use tracing::{debug, instrument, error};
 use std::time::Instant;
 use chrono::Utc;
 use diff;
@@ -44,34 +47,46 @@ pub struct FuzzyMatchDetailsMCP {
 
 const FUZZY_SIMILARITY_THRESHOLD_MCP: f64 = 0.7;
 
-// MODIFIED: Made async and added .await
 async fn read_file_for_edit_mcp_internal(
     app_handle: &tauri::AppHandle,
     file_path_str: &str,
     config: &Config
 ) -> Result<(String, PathBuf, LineEndingStyle), AppError> {
     let path = validate_and_normalize_path(file_path_str, config, true, false)?;
+    // Permission check using the plugin's scope API
     if !app_handle.fs_scope().is_allowed(&path) {
+        error!("Read denied by FS scope for path: {}", path.display());
         return Err(AppError::PathNotAllowed(format!("Read denied by FS scope: {}", path.display())));
     }
-    // MODIFIED: Added .await as fs().read_text_file() IS asynchronous
-    let original_content = app_handle.fs().read_text_file(FilePath::Path(path.clone()))
-        .await.map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to read text file {}: {}", path.display(), e)})?;
+    debug!(path = %path.display(), "FS scope check passed. Attempting to read file with tokio::fs");
+
+    // MODIFIED: Use tokio::fs::read_to_string
+    let original_content = tokio_fs::read_to_string(&path).await
+        .map_err(|e| {
+            error!(path = %path.display(), error = %e, "Error from tokio_fs::read_to_string");
+            AppError::TokioIoError(format!("Failed to read file {}: {}", path.display(), e))
+        })?;
     Ok((original_content, path, detect_line_ending(&original_content)))
 }
 
-// MODIFIED: Made async and added .await
 async fn write_file_after_edit_mcp(
     app_handle: &tauri::AppHandle,
     path_obj: &PathBuf,
-    content: String
+    content: String 
 ) -> Result<(), AppError> {
+    // Permission check using the plugin's scope API
     if !app_handle.fs_scope().is_allowed(path_obj) {
+         error!("Write denied by FS scope for path: {}", path_obj.display());
         return Err(AppError::PathNotAllowed(format!("Write denied by FS scope: {}", path_obj.display())));
     }
-    // MODIFIED: Added .await as fs().write_text_file() IS asynchronous
-    app_handle.fs().write_text_file(FilePath::Path(path_obj.clone()), content, Some(FileOptions { append: Some(false), base_dir: None }))
-        .await.map_err(|e| AppError::PluginError{plugin:"fs".to_string(), message:format!("Failed to write text file {}: {}", path_obj.display(), e)})
+    debug!(path = %path_obj.display(), "FS scope check passed. Attempting to write file with tokio::fs");
+
+    // MODIFIED: Use tokio::fs::write
+    tokio_fs::write(&path_obj, content.as_bytes()).await
+        .map_err(|e| {
+            error!(path = %path_obj.display(), error = %e, "Error from tokio_fs::write");
+            AppError::TokioIoError(format!("Failed to write file {}: {}", path_obj.display(), e))
+        })
 }
 
 
@@ -84,7 +99,6 @@ pub async fn mcp_edit_block(
 
     let (original_content, validated_path, file_line_ending, fuzzy_log_path, _files_root_for_log) = {
         let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-        // MODIFIED: Added .await
         let (content, path, ending) = read_file_for_edit_mcp_internal(&deps.app_handle, &params.file_path, &*config_guard).await?;
         (content, path, ending, config_guard.fuzzy_search_log_file.clone(), config_guard.files_root.clone())
     };
@@ -99,7 +113,6 @@ pub async fn mcp_edit_block(
     if (params.expected_replacements > 0 && actual_occurrences == params.expected_replacements) ||
        (params.expected_replacements == 0 && actual_occurrences > 0) {
         let new_content = original_content.replace(&norm_old, &norm_new);
-        // MODIFIED: Added .await
         write_file_after_edit_mcp(&deps.app_handle, &validated_path, new_content).await?;
         let msg_key = if params.expected_replacements == 0 {"all occurrences"} else {"exact replacement(s)"};
         return Ok(EditBlockResultMCP {
