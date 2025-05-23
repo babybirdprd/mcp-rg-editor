@@ -60,6 +60,7 @@ diff = "0.1.13"
 dunce = "1.0.4"
 tokio = { version = "1.38.1", features = ["full"] }
 once_cell = "1.19.0"
+dirs-next = "0.7.0" # Added for home directory access
 
 # For MCP SSE Server (if enabled)
 axum = { version = "0.7.5", optional = true }

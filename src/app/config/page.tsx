@@ -3,7 +3,8 @@
 "use client";
 
 import { useEffect, useState, useCallback, ChangeEvent } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, dialog } from "@tauri-apps/api/core";
+import { relaunch } from "@tauri-apps/api/process";
 // import { emit, listen } from "@tauri-apps/api/event"; // Not used in this version
 import { toast } from "sonner";
 
@@ -68,6 +69,7 @@ export default function ConfigPage() {
     file_read_line_limit_str: "1000",
     file_write_line_limit_str: "50",
   });
+  const [editableFilesRoot, setEditableFilesRoot] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -85,6 +87,7 @@ export default function ConfigPage() {
         file_read_line_limit_str: result.file_read_line_limit.toString(),
         file_write_line_limit_str: result.file_write_line_limit.toString(),
       });
+      setEditableFilesRoot(result.files_root ?? "");
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.error("Failed to fetch config:", errorMessage);
@@ -130,6 +133,89 @@ export default function ConfigPage() {
       });
     }
   };
+
+  const handleBrowseFilesRoot = async () => {
+    try {
+      // Attempt to get the current files_root to use as defaultPath
+      let currentFilesRoot: string | undefined = undefined;
+      if (config && config.files_root) {
+          currentFilesRoot = config.files_root;
+      } else {
+          try {
+              const currentConfig = await invoke<AppConfig>("get_config_command");
+              currentFilesRoot = currentConfig.files_root;
+          } catch (e) {
+              console.warn("Could not fetch current files_root for dialog default path:", e);
+          }
+      }
+
+      const selectedPath = await dialog.open({
+        directory: true,
+        multiple: false,
+        title: "Select New Files Root Directory",
+        defaultPath: currentFilesRoot,
+      });
+
+      let newPath: string | null = null;
+      if (Array.isArray(selectedPath)) {
+        newPath = selectedPath[0] ?? null;
+      } else {
+        newPath = selectedPath;
+      }
+
+      if (newPath) {
+        setEditableFilesRoot(newPath);
+        toast.info("New path selected. Click 'Save Files Root' to apply.", { description: "Path Selected" });
+      }
+    } catch (err) {
+      // Catch errors, but don't show a toast if the user simply canceled the dialog
+      if (err && typeof err === 'string' && err.toLowerCase().includes('dialog closed') || err && typeof err === 'string' && err.toLowerCase().includes('cancelled')) {
+          // User cancelled dialog, no need for error toast
+          console.log("File dialog cancelled by user.");
+      } else {
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          console.error("Error opening directory dialog:", errorMessage);
+          toast.error(errorMessage, { description: "Dialog Error" });
+      }
+    }
+  };
+
+  const handleSaveFilesRoot = async () => {
+    if (!editableFilesRoot.trim() || editableFilesRoot === config?.files_root) { // Added trim() for robustness
+      toast.info(editableFilesRoot.trim() ? "No changes to save for Files Root." : "Files Root path cannot be empty.", {
+        description: editableFilesRoot.trim() ? "Files Root Unchanged" : "Invalid Path",
+      });
+      return;
+    }
+    try {
+      const resultMessage = await invoke<string>("set_persistent_files_root", {
+        newPath: editableFilesRoot,
+      });
+      toast.success(resultMessage, {
+        description: "Files Root Saved",
+        action: {
+          label: "Restart Now",
+          onClick: async () => {
+            try {
+              await relaunch();
+            } catch (err) {
+              const relaunchError = err instanceof Error ? err.message : String(err);
+              console.error("Failed to relaunch application:", relaunchError);
+              toast.error("Failed to relaunch automatically. Please restart the application manually.", {
+                description: "Relaunch Error"
+              });
+            }
+          },
+        },
+      });
+      await fetchConfig(); // Refresh config to update UI state (e.g., disable save button)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.error("Failed to save Files Root:", errorMessage);
+      toast.error(errorMessage, { description: "Save Error" });
+    }
+  };
+
 
   if (isLoading) {
     return (
@@ -179,17 +265,10 @@ export default function ConfigPage() {
           <CardHeader>
             <CardTitle>Core Settings (Read-only)</CardTitle>
             <CardDescription>
-              Fundamental settings typically set via environment variables at startup.
+              Fundamental settings typically set via environment variables at startup or derived by the application.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div>
-              <Label htmlFor="files_root">Files Root</Label>
-              <Input id="files_root" value={config.files_root} readOnly />
-               <p className="text-sm text-muted-foreground mt-1">
-                The primary directory the application operates within. (Env: FILES_ROOT)
-              </p>
-            </div>
              <div>
               <Label htmlFor="mcp_log_dir">Log Directory</Label>
               <Input id="mcp_log_dir" value={config.mcp_log_dir} readOnly />
@@ -200,6 +279,51 @@ export default function ConfigPage() {
             <div><Label htmlFor="audit_log_file">Audit Log File Path</Label><Input id="audit_log_file" value={config.audit_log_file} readOnly /></div>
             <div><Label htmlFor="fuzzy_search_log_file">Fuzzy Search Log File Path</Label><Input id="fuzzy_search_log_file" value={config.fuzzy_search_log_file} readOnly /></div>
           </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Persistent Storage Settings</CardTitle>
+            <CardDescription>
+              Changes to these settings are saved to persistent storage (settings.json) and require an application restart to take effect.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label htmlFor="editable_files_root">Files Root</Label>
+              <Input 
+                id="editable_files_root" 
+                value={editableFilesRoot} 
+                onChange={(e) => setEditableFilesRoot(e.target.value)} 
+                placeholder="e.g., /path/to/your/projects or C:\Users\YourUser\Documents\Projects"
+              />
+               <p className="text-sm text-muted-foreground mt-1">
+                The primary directory the application operates within. This is saved in settings.json. (Overrides Env: FILES_ROOT if set)
+              </p>
+            </div>
+          </CardContent>
+          <CardFooter className="flex flex-col items-start space-y-3 pt-4">
+            <div className="flex flex-col space-y-2 w-full sm:flex-row sm:space-y-0 sm:space-x-2">
+              <Button 
+                onClick={handleSaveFilesRoot}
+                disabled={!editableFilesRoot || editableFilesRoot === config?.files_root}
+                className="w-full sm:w-auto"
+              >
+                Save Files Root
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={handleBrowseFilesRoot}
+                className="w-full sm:w-auto"
+              >
+                Browse...
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Changes to Files Root require an application restart to take full effect. 
+              The application will use the new path on the next launch.
+            </p>
+          </CardFooter>
         </Card>
 
         <Card>

@@ -107,11 +107,37 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             let app_handle = app.handle().clone();
-            let config_state_arc = init_config_state(&app_handle);
+            
+            // Initialize config state, now returns a Result
+            let config_state_arc = match init_config_state(&app_handle) {
+                Ok(loaded_config) => {
+                    // Setup logging *after* successful config load
+                    let log_level_for_setup = loaded_config.read().expect("Failed to read config for log setup").log_level.clone();
+                    setup_tracing_and_logging(&log_level_for_setup, &app_handle);
+                    tracing::info!("Configuration loaded successfully.");
+                    loaded_config
+                }
+                Err(e) => {
+                    // Setup basic logging for the error message itself if full setup failed
+                    // Using a default or minimal logging setup here if setup_tracing_and_logging hasn't run
+                    // For simplicity, we'll just use tracing::error! which might go to stderr if not configured
+                    let error_message = format!(
+                        "Failed to initialize application configuration: {}. Please check settings (e.g., settings.json or FILES_ROOT environment variable) and logs. The application may not function correctly.",
+                        e
+                    );
+                    tracing::error!("{}", error_message); // Log it first
 
-            let log_level_for_setup = config_state_arc.read().unwrap().log_level.clone();
-            setup_tracing_and_logging(&log_level_for_setup, &app_handle);
+                    let dialog_handle = app_handle.dialog();
+                    dialog_handle
+                        .message(error_message.clone())
+                        .title("Configuration Error")
+                        .kind(tauri_plugin_dialog::MessageDialogKind::Error)
+                        .buttons(MessageDialogButtons::Ok)
+                        .show(|_| {}); // Queues the dialog
 
+                    return Err(anyhow::anyhow!("Configuration initialization failed: {}", e).into());
+                }
+            };
 
             app.manage(config_state_arc.clone());
 
@@ -234,6 +260,7 @@ pub fn run() {
             commands::greet,
             commands::config_commands::get_config_command,
             commands::config_commands::set_config_value_command,
+            commands::config_commands::set_persistent_files_root, // Added here
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

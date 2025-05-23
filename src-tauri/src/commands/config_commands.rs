@@ -1,8 +1,9 @@
-use crate::config::{Config, expand_tilde};
+use crate::config::{Config, UserAppSettings, expand_tilde}; // Added UserAppSettings
 use crate::error::AppError;
 use crate::utils::audit_logger::audit_log;
 
-use serde_json::Value;
+use serde_json::{Value, self}; // Added self for serde_json
+use std::fs; // Added fs
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock as StdRwLock};
 use tauri::{AppHandle, State};
@@ -134,4 +135,113 @@ pub async fn set_config_value_command(
 
     info!(key = %key, "Successfully set config value via UI command");
     Ok(format!("Successfully set config key '{}'. Changes are in-memory for the current session.", key))
+}
+
+#[tauri::command(async)]
+pub async fn set_persistent_files_root(
+    app_handle: AppHandle,
+    new_path: String,
+) -> Result<String, String> {
+    info!(new_path = %new_path, "Attempting to set persistent FILES_ROOT");
+
+    let settings_path = match app_handle.path().app_config_dir() {
+        Ok(dir) => dir.join("settings.json"),
+        Err(e) => {
+            return Err(format!("Failed to get app config directory: {}", e.to_string()));
+        }
+    };
+    info!(settings_file_path = %settings_path.display(), "Determined settings.json path");
+
+    let expanded_new_path = match expand_tilde(&new_path) {
+        Ok(p) => p,
+        Err(e) => {
+            return Err(format!("Failed to expand path '{}': {}", new_path, e.to_string()));
+        }
+    };
+    info!(expanded_path = %expanded_new_path.display(), "Expanded input path");
+
+    // Validate path: Check if it's a directory, try to create if not.
+    if !expanded_new_path.exists() {
+        info!(path = %expanded_new_path.display(), "Path does not exist, attempting to create it.");
+        if let Err(e) = fs::create_dir_all(&expanded_new_path) {
+            return Err(format!(
+                "Failed to create directory '{}': {}. Please check permissions and path validity.",
+                expanded_new_path.display(),
+                e.to_string()
+            ));
+        }
+        info!(path = %expanded_new_path.display(), "Successfully created directory.");
+    } else if !expanded_new_path.is_dir() {
+        return Err(format!(
+            "'{}' exists but is not a directory.",
+            expanded_new_path.display()
+        ));
+    }
+    
+    // Canonicalize the path after ensuring it exists (or was created) and is a directory
+    let canonical_path = match expanded_new_path.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+             return Err(format!(
+                "Failed to canonicalize path '{}': {}",
+                expanded_new_path.display(),
+                e.to_string()
+            ));
+        }
+    };
+    info!(canonical_path = %canonical_path.display(), "Canonicalized path");
+
+    // Read existing settings or create new
+    let mut user_app_settings: UserAppSettings = if settings_path.exists() && settings_path.is_file() {
+        info!(path = %settings_path.display(), "settings.json exists, attempting to read and parse.");
+        match fs::read_to_string(&settings_path) {
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(settings) => {
+                    info!("Successfully parsed settings.json.");
+                    settings
+                },
+                Err(e) => {
+                    warn!(error = %e.to_string(), path = %settings_path.display(), "Failed to parse settings.json, creating new default settings.");
+                    UserAppSettings { files_root: None }
+                }
+            },
+            Err(e) => {
+                warn!(error = %e.to_string(), path = %settings_path.display(), "Failed to read settings.json, creating new default settings.");
+                UserAppSettings { files_root: None }
+            }
+        }
+    } else {
+        info!(path = %settings_path.display(), "settings.json does not exist or is not a file, creating new default settings.");
+        UserAppSettings { files_root: None }
+    };
+
+    user_app_settings.files_root = Some(canonical_path.to_string_lossy().into_owned());
+    info!(new_files_root = ?user_app_settings.files_root, "Updated files_root in settings object");
+
+    // Ensure parent directory for settings.json exists
+    if let Some(parent_dir) = settings_path.parent() {
+        if !parent_dir.exists() {
+            info!(parent_dir = %parent_dir.display(), "Parent directory for settings.json does not exist, attempting to create.");
+            if let Err(e) = fs::create_dir_all(parent_dir) {
+                return Err(format!(
+                    "Failed to create directory for settings.json ('{}'): {}",
+                    parent_dir.display(),
+                    e.to_string()
+                ));
+            }
+            info!(parent_dir = %parent_dir.display(), "Successfully created parent directory for settings.json");
+        }
+    }
+
+    match serde_json::to_string_pretty(&user_app_settings) {
+        Ok(json_string) => {
+            if let Err(e) = fs::write(&settings_path, json_string) {
+                Err(format!("Failed to write settings to '{}': {}", settings_path.display(), e.to_string()))
+            } else {
+                info!(path = %settings_path.display(), "Successfully saved new FILES_ROOT to settings.json");
+                Ok("FILES_ROOT updated. Please restart the application for changes to take effect.".to_string())
+            }
+        }
+        Err(e) => Err(format!("Failed to serialize settings: {}", e.to_string())),
+    }
 }
