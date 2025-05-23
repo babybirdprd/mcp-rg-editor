@@ -6,7 +6,7 @@ use crate::commands::terminal_commands::ActiveSession;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{Emitter};
-use tauri_plugin_shell::{process::CommandEvent, ShellExt, process::Command as TauriShellCommand}; // MODIFIED: Removed 'Error as ShellError'
+use tauri_plugin_shell::{process::CommandEvent, ShellExt, process::Command as TauriShellCommand}; 
 use tokio::sync::Mutex as TokioMutex;
 use tokio::time::{timeout, Duration, Instant as TokioInstant};
 use tracing::{debug, error, info, instrument, warn};
@@ -58,13 +58,17 @@ fn is_command_blocked_mcp(command_str: &str, config: &Config) -> bool {
 
 #[instrument(skip(deps, params), fields(command = %params.command))]
 pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommandParamsMCP) -> Result<ExecuteCommandResultMCP, AppError> {
-    let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-    if is_command_blocked_mcp(&params.command, &config_guard) {
+    let (cwd_path, shell_to_use_opt, is_blocked) = { // Scope for config_guard
+        let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
+        let blocked = is_command_blocked_mcp(&params.command, &*config_guard);
+        let cwd = config_guard.files_root.clone();
+        let shell_opt = params.shell.clone().or_else(|| config_guard.default_shell.clone());
+        (cwd, shell_opt, blocked)
+    }; // config_guard is dropped here
+
+    if is_blocked {
         return Err(AppError::CommandBlocked(params.command.clone()));
     }
-    let cwd_path = config_guard.files_root.clone();
-    let shell_to_use_opt = params.shell.clone().or_else(|| config_guard.default_shell.clone());
-    drop(config_guard);
 
     let session_id = Uuid::new_v4().to_string();
 
@@ -96,6 +100,9 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
         session_id: session_id.clone(),
         pid: Some(pid_val),
     });
+    
+    // This await was the problematic one with the config_guard potentially still alive.
+    // Now config_guard is dropped, so this should be fine.
     deps.active_sessions_map.lock().await.insert(session_id.clone(), active_session_arc.clone());
 
     let initial_output_timeout_ms = params.timeout_ms.unwrap_or(1000);
@@ -112,16 +119,16 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
         }
 
         match timeout(Duration::from_millis(50), rx.recv()).await {
-            Ok(Some(event)) => { // Event received from stream (event is CommandEvent)
+            Ok(Some(event)) => { 
                 match event {
                     CommandEvent::Stdout(line) => initial_stdout_lines.push(String::from_utf8_lossy(&line).into_owned()),
                     CommandEvent::Stderr(line) => initial_stderr_lines.push(String::from_utf8_lossy(&line).into_owned()),
                     CommandEvent::Terminated(payload) => { early_exit_code = payload.code; break; }
                     CommandEvent::Error(msg) => { error!("Cmd error during initial read: {}", msg); early_exit_code = Some(-1); break; }
-                    _ => {} // Other events like Pid
+                    _ => {} 
                 }
             },
-            Ok(None) => { // Stream ended
+            Ok(None) => { 
                 break;
             },
             Err(_elapsed_err) => { /* timeout for this 50ms iteration, continue loop */ }
@@ -138,7 +145,7 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
     if early_exit_code.is_none() {
         tokio::spawn(async move {
             loop {
-                match rx.recv().await { // event_from_channel is CommandEvent
+                match rx.recv().await { 
                     Some(event_from_channel) => {
                         match event_from_channel {
                             CommandEvent::Stdout(line) => {
@@ -154,9 +161,9 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
                                 sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
                                 break;
                             }
-                            CommandEvent::Error(message) => { // This is an error string from the shell plugin itself, not stderr from the command
+                            CommandEvent::Error(message) => { 
                                 error!(sid = %session_id_clone_for_task, message = %message, "Background task: Command error in stream");
-                                *active_session_clone_for_task.exit_code.lock().await = Some(-1); // Or a more specific error code
+                                *active_session_clone_for_task.exit_code.lock().await = Some(-1); 
                                 app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "error", "data": message })).unwrap_or_else(|e| error!("Emit error failed: {}", e));
                                 sessions_map_clone_for_task.lock().await.remove(&session_id_clone_for_task);
                                 break;
@@ -164,10 +171,9 @@ pub async fn mcp_execute_command(deps: &ToolDependencies, params: ExecuteCommand
                             _other_event => { /* e.g. CommandEvent::Pid - can ignore or log */ }
                         }
                     },
-                    None => { // Stream closed
+                    None => { 
                         info!(sid = %session_id_clone_for_task, "Background task: Command event stream closed");
                         if active_session_clone_for_task.exit_code.lock().await.is_none() {
-                            // If no Terminated event was received, assume success (or handle based on context)
                             *active_session_clone_for_task.exit_code.lock().await = Some(0);
                         }
                         app_handle_clone.emit_to("main", &format!("terminal_output_{}", session_id_clone_for_task), json!({"type": "finished_stream_closed"})).unwrap_or_else(|e| error!("Emit finished failed: {}", e));

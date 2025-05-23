@@ -7,10 +7,10 @@ use crate::utils::path_utils::validate_and_normalize_path;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-// MODIFIED: FsExt is needed for fs_scope(). Removed FilePath as tokio::fs uses Path/PathBuf.
+use std::sync::{Arc, RwLock as StdRwLock}; // Added RwLock for config_state
 use tauri_plugin_fs::FsExt;
-use tokio::fs as tokio_fs; // For async file operations
-#[allow(unused_imports)] // May not be needed if only using read_to_string and write
+use tokio::fs as tokio_fs; 
+#[allow(unused_imports)] 
 use tokio::io::{AsyncReadExt, AsyncWriteExt}; 
 use tracing::{debug, instrument, error};
 use std::time::Instant;
@@ -50,9 +50,13 @@ const FUZZY_SIMILARITY_THRESHOLD_MCP: f64 = 0.7;
 async fn read_file_for_edit_mcp_internal(
     app_handle: &tauri::AppHandle,
     file_path_str: &str,
-    config: &Config
+    config_state: &Arc<StdRwLock<Config>> // MODIFIED: Accept Arc<RwLock<Config>>
 ) -> Result<(String, PathBuf, LineEndingStyle), AppError> {
-    let path = validate_and_normalize_path(file_path_str, config, true, false)?;
+    let path = { // Scope for config_guard
+        let config_guard = config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock for path validation: {}", e)))?;
+        validate_and_normalize_path(file_path_str, &*config_guard, true, false)?
+    };
+    
     // Permission check using the plugin's scope API
     if !app_handle.fs_scope().is_allowed(&path) {
         error!("Read denied by FS scope for path: {}", path.display());
@@ -60,13 +64,16 @@ async fn read_file_for_edit_mcp_internal(
     }
     debug!(path = %path.display(), "FS scope check passed. Attempting to read file with tokio::fs");
 
-    // MODIFIED: Use tokio::fs::read_to_string
     let original_content = tokio_fs::read_to_string(&path).await
         .map_err(|e| {
             error!(path = %path.display(), error = %e, "Error from tokio_fs::read_to_string");
             AppError::TokioIoError(format!("Failed to read file {}: {}", path.display(), e))
         })?;
-    Ok((original_content, path, detect_line_ending(&original_content)))
+    
+    // MODIFIED: Detect line ending before moving original_content
+    let line_ending_style = detect_line_ending(&original_content);
+    
+    Ok((original_content, path, line_ending_style))
 }
 
 async fn write_file_after_edit_mcp(
@@ -74,14 +81,12 @@ async fn write_file_after_edit_mcp(
     path_obj: &PathBuf,
     content: String 
 ) -> Result<(), AppError> {
-    // Permission check using the plugin's scope API
     if !app_handle.fs_scope().is_allowed(path_obj) {
          error!("Write denied by FS scope for path: {}", path_obj.display());
         return Err(AppError::PathNotAllowed(format!("Write denied by FS scope: {}", path_obj.display())));
     }
     debug!(path = %path_obj.display(), "FS scope check passed. Attempting to write file with tokio::fs");
 
-    // MODIFIED: Use tokio::fs::write
     tokio_fs::write(&path_obj, content.as_bytes()).await
         .map_err(|e| {
             error!(path = %path_obj.display(), error = %e, "Error from tokio_fs::write");
@@ -97,11 +102,15 @@ pub async fn mcp_edit_block(
 ) -> Result<EditBlockResultMCP, AppError> {
     if params.old_string.is_empty() { return Err(AppError::EditError("old_string cannot be empty.".into())); }
 
-    let (original_content, validated_path, file_line_ending, fuzzy_log_path, _files_root_for_log) = {
-        let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
-        let (content, path, ending) = read_file_for_edit_mcp_internal(&deps.app_handle, &params.file_path, &*config_guard).await?;
-        (content, path, ending, config_guard.fuzzy_search_log_file.clone(), config_guard.files_root.clone())
+    // MODIFIED: Call updated read_file_for_edit_mcp_internal
+    let (original_content, validated_path, file_line_ending) = 
+        read_file_for_edit_mcp_internal(&deps.app_handle, &params.file_path, &deps.config_state).await?;
+
+    let (fuzzy_log_path, _files_root_for_log) = { // Scope for config_guard
+        let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock for log paths: {}", e)))?;
+        (config_guard.fuzzy_search_log_file.clone(), config_guard.files_root.clone())
     };
+
 
     let file_ext = validated_path.extension().unwrap_or_default().to_string_lossy().to_lowercase();
 

@@ -10,12 +10,11 @@ use sysinfo::System as SysinfoSystem;
 use async_trait::async_trait;
 use rust_mcp_sdk::McpServer;
 use rust_mcp_sdk::mcp_server::ServerHandler;
-// MODIFIED: Corrected import path for RpcErrorCodes and ensured others are from root.
 use rust_mcp_schema::{
     CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool,
-    CallToolResultContentItem, // For constructing result content
-    TextContent,               // For wrapping JSON string in text content
-    schema_utils::CallToolError, RpcError, schema_utils::RpcErrorCodes, // Moved RpcErrorCodes here
+    CallToolResultContentItem, 
+    TextContent,               
+    schema_utils::CallToolError, RpcError, schema_utils::RpcErrorCodes, 
 };
 use serde_json::Value;
 use std::sync::{Arc, RwLock as StdRwLock};
@@ -60,7 +59,7 @@ impl EnhancedServerHandler {
 
 fn mcp_call_tool_error_from_app_error(app_err: AppError, tool_name: &str) -> CallToolError {
     error!(error = %app_err, tool = tool_name, "Error during MCP tool execution");
-    // MODIFIED: Use RpcErrorCodes enum and convert to i64
+    // MODIFIED: rpc_error_code_val is i64, and passed directly to RpcError::new
     let rpc_error_code_val: i64 = match app_err {
         AppError::InvalidInputArgument(_) | AppError::PathNotAllowed(_) | AppError::PathTraversal(_) | AppError::InvalidPath(_) => RpcErrorCodes::INVALID_PARAMS.into(),
         AppError::CommandBlocked(_) => -32001i64, // Custom server error code for CommandBlocked
@@ -69,14 +68,13 @@ fn mcp_call_tool_error_from_app_error(app_err: AppError, tool_name: &str) -> Cal
     CallToolError::new(RpcError::new(rpc_error_code_val, app_err.to_string(), None))
 }
 
-// MODIFIED: Updated to serialize Value to JSON string and use TextContent
 fn create_mcp_json_call_tool_result(value: Value) -> Result<CallToolResult, CallToolError> {
     let json_string = serde_json::to_string(&value)
         .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INTERNAL_ERROR.into(), format!("Failed to serialize result to JSON string: {}", e), None)))?;
     
     let content_item = CallToolResultContentItem::TextContent(TextContent::new(
         json_string,
-        None, // No specific annotations for this generic JSON response
+        None, 
     ));
     Ok(CallToolResult { content: vec![content_item], meta: None, is_error: Some(false) })
 }
@@ -127,10 +125,11 @@ impl ServerHandler for EnhancedServerHandler {
 
         match tool_name {
             "mcp_get_config" => {
-                let config_guard = self.deps.config_state.read()
-                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INTERNAL_ERROR.into(), format!("Config lock error: {}", e), None)))?;
-                let current_config_data = config_guard.clone();
-                drop(config_guard);
+                let current_config_data = { 
+                    let config_guard = self.deps.config_state.read()
+                        .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INTERNAL_ERROR.into(), format!("Config lock error: {}", e), None)))?;
+                    config_guard.clone()
+                };
                 let value_result = serde_json::to_value(current_config_data)
                     .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INTERNAL_ERROR.into(), format!("Failed to serialize config: {}", e), None)))?;
                 create_mcp_json_call_tool_result(value_result)

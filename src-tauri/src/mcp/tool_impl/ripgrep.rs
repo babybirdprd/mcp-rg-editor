@@ -4,7 +4,7 @@ use crate::utils::path_utils::validate_and_normalize_path;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri_plugin_shell::ShellExt; // Corrected import
+use tauri_plugin_shell::ShellExt; 
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, instrument, warn};
 
@@ -70,18 +70,17 @@ pub async fn mcp_search_code(
     params: SearchCodeParamsMCP,
 ) -> Result<SearchCodeResultMCP, AppError> {
     let rg_exe_path = get_rg_path_mcp()?;
-    let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
     debug!("MCP Tool: search_code with params: {:?}", params);
 
-    let search_dir_str = if params.path.is_empty() || params.path == "." {
-        config_guard.files_root.to_str().unwrap_or(".").to_string()
-    } else { params.path.clone() };
-
-    let search_path_validated = validate_and_normalize_path(&search_dir_str, &config_guard, true, false)?;
-    let files_root_for_stripping = config_guard.files_root.clone();
-    // Drop config_guard here as it's not needed across await for this function's direct logic
-    // It was passed to validate_and_normalize_path which doesn't hold it across await.
-    drop(config_guard);
+    let (search_path_validated, files_root_for_stripping) = { // Scope for config_guard
+        let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
+        let search_dir_str = if params.path.is_empty() || params.path == "." {
+            config_guard.files_root.to_str().unwrap_or(".").to_string()
+        } else { params.path.clone() };
+        let spv = validate_and_normalize_path(&search_dir_str, &*config_guard, true, false)?;
+        let frfs = config_guard.files_root.clone();
+        (spv, frfs)
+    }; // config_guard dropped here
 
 
     let mut rg_args = Vec::new();
