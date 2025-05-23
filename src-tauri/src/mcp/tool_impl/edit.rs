@@ -44,6 +44,7 @@ pub struct FuzzyMatchDetailsMCP {
 
 const FUZZY_SIMILARITY_THRESHOLD_MCP: f64 = 0.7;
 
+// MODIFIED: Made async and added .await
 async fn read_file_for_edit_mcp_internal(
     app_handle: &tauri::AppHandle,
     file_path_str: &str,
@@ -59,7 +60,7 @@ async fn read_file_for_edit_mcp_internal(
     Ok((original_content, path, detect_line_ending(&original_content)))
 }
 
-
+// MODIFIED: Made async and added .await
 async fn write_file_after_edit_mcp(
     app_handle: &tauri::AppHandle,
     path_obj: &PathBuf,
@@ -83,6 +84,7 @@ pub async fn mcp_edit_block(
 
     let (original_content, validated_path, file_line_ending, fuzzy_log_path, _files_root_for_log) = {
         let config_guard = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock: {}", e)))?;
+        // MODIFIED: Added .await
         let (content, path, ending) = read_file_for_edit_mcp_internal(&deps.app_handle, &params.file_path, &*config_guard).await?;
         (content, path, ending, config_guard.fuzzy_search_log_file.clone(), config_guard.files_root.clone())
     };
@@ -97,6 +99,7 @@ pub async fn mcp_edit_block(
     if (params.expected_replacements > 0 && actual_occurrences == params.expected_replacements) ||
        (params.expected_replacements == 0 && actual_occurrences > 0) {
         let new_content = original_content.replace(&norm_old, &norm_new);
+        // MODIFIED: Added .await
         write_file_after_edit_mcp(&deps.app_handle, &validated_path, new_content).await?;
         let msg_key = if params.expected_replacements == 0 {"all occurrences"} else {"exact replacement(s)"};
         return Ok(EditBlockResultMCP {

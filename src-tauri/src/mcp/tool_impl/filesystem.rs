@@ -7,9 +7,9 @@ use crate::utils::line_ending_handler::{detect_line_ending, normalize_line_endin
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::RwLockReadGuard;
-// MODIFIED: Removed direct imports of tauri_plugin_fs types for I/O. FsExt is kept for scope checks.
 use tauri_plugin_fs::FsExt;
-use tokio::fs as tokio_fs; // Using tokio::fs for async operations
+use tokio::fs as tokio_fs; 
+use tokio::io::AsyncWriteExt; // MODIFIED: Added this import
 
 use tracing::{debug, warn, instrument};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
@@ -93,13 +93,11 @@ pub struct ReadMultipleFilesResultMCP { pub results: Vec<FileContentMCP> }
 #[derive(Debug, Serialize)]
 pub struct FileOperationResultMCP { pub success: bool, pub path: String, pub message: String }
 
-// MODIFIED: DirEntry for ListDirectoryResultMCP to be simpler, matching std::fs::DirEntry info
 #[derive(Debug, Serialize)]
 pub struct DirEntryMCP {
     pub path: String,
     pub name: Option<String>,
     pub is_dir: bool,
-    // is_file can be inferred if !is_dir for basic listing, or add if needed
 }
 #[derive(Debug, Serialize)]
 pub struct ListDirectoryResultMCP { pub path: String, pub entries: Vec<DirEntryMCP> }
@@ -170,7 +168,8 @@ pub async fn mcp_read_file(deps: &ToolDependencies, params: ReadFileParamsMCP) -
         Ok(FileContentMCP { path: params.path, text_content: None, image_data_base64: Some(BASE64_STANDARD.encode(&bytes)), mime_type, lines_read: None, total_lines: None, truncated: None, error: None })
     } else {
         let full_content = tokio_fs::read_to_string(&path).await.map_err(|e| AppError::TokioIoError(e.to_string()))?;
-        let mut lines_iter = full_content.lines();
+        // MODIFIED: Removed mut from lines_iter
+        let lines_iter = full_content.lines();
         let mut content_vec = Vec::new();
         let mut current_line_idx = 0;
         let mut total_lines_count = 0;
@@ -205,8 +204,10 @@ pub async fn mcp_write_file(deps: &ToolDependencies, params: WriteFileParamsMCP)
 
     if params.mode == WriteModeMCP::Append {
         let mut file = tokio_fs::OpenOptions::new().append(true).create(true).open(&path).await.map_err(|e| AppError::TokioIoError(e.to_string()))?;
+        // MODIFIED: Added .await
         file.write_all(final_content_str.as_bytes()).await.map_err(|e| AppError::TokioIoError(e.to_string()))?;
     } else {
+        // MODIFIED: Added .await
         tokio_fs::write(&path, final_content_str).await.map_err(|e| AppError::TokioIoError(e.to_string()))?;
     }
 
@@ -252,7 +253,8 @@ pub async fn mcp_move_file(deps: &ToolDependencies, params: MoveFileParamsMCP) -
         return Err(AppError::PathNotAllowed(format!("FS scope disallows move from {} or to {}", source_path.display(), dest_path.parent().unwrap_or(&dest_path).display())));
     }
     tokio_fs::rename(&source_path, &dest_path).await.map_err(|e|AppError::TokioIoError(e.to_string()))?;
-    Ok(FileOperationResultMCP { success: true, path: params.destination, message: format!("Moved {} to {}.", params.source, params.destination) })
+    // MODIFIED: Cloned params.destination for the format! macro
+    Ok(FileOperationResultMCP { success: true, path: params.destination.clone(), message: format!("Moved {} to {}.", params.source, params.destination) })
 }
 
 #[instrument(skip(deps, params), fields(path = %params.path))]
@@ -338,7 +340,7 @@ async fn search_files_recursive_mcp_internal(
     current_depth: usize,
     max_depth: usize,
     files_root_for_relative_path: &Path,
-    config_guard: &RwLockReadGuard<'_, Config>, // Keep as RwLockReadGuard if config is read-only here
+    config_guard: &RwLockReadGuard<'_, Config>,
 ) -> Result<(), AppError> {
     if current_depth > max_depth { return Ok(()); }
 
@@ -355,7 +357,7 @@ async fn search_files_recursive_mcp_internal(
         Ok(rd) => rd,
         Err(e) => {
             warn!(path = %dir_to_search.display(), error = %e, "Could not read directory during search_files");
-            return Ok(()); // Skip unreadable directories
+            return Ok(()); 
         }
     };
     
@@ -373,7 +375,8 @@ async fn search_files_recursive_mcp_internal(
             }
         }
         if entry.file_type().await.map_err(|e| AppError::TokioIoError(e.to_string()))?.is_dir() && current_depth < max_depth {
-            search_files_recursive_mcp_internal(app_handle, full_path, pattern_lower, matches, current_depth + 1, max_depth, files_root_for_relative_path, config_guard).await?;
+            // MODIFIED: Added Box::pin for recursive async call
+            Box::pin(search_files_recursive_mcp_internal(app_handle, full_path, pattern_lower, matches, current_depth + 1, max_depth, files_root_for_relative_path, config_guard)).await?;
         }
     }
     Ok(())
@@ -390,22 +393,14 @@ pub async fn mcp_search_files(deps: &ToolDependencies, params: SearchFilesParams
     let max_depth_clone = params.max_depth;
     let recursive_clone = params.recursive;
 
-    // Drop the guard before await if its lifetime is an issue.
-    // Here, config_guard is passed to search_files_recursive_mcp_internal,
-    // so its lifetime needs to be managed carefully if that function also awaits.
-    // For this pass, assume config_guard is read-only within the recursive call.
-
 
     let search_operation = async {
         let mut matches = Vec::new();
 
         if recursive_clone {
-            // Re-acquire read lock for the recursive call if needed, or pass relevant parts of config.
-            // For simplicity, assuming config_guard can be borrowed read-only across the recursive calls.
-            // If this causes lifetime issues, config_guard would need to be dropped and re-acquired,
-            // or specific config values passed down.
             let temp_config_guard_for_recursion = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock for recursion: {}", e)))?;
-            search_files_recursive_mcp_internal(&app_handle_clone, root_search_path.clone(), &pattern_lower_clone, &mut matches, 0, max_depth_clone, &files_root_clone, &temp_config_guard_for_recursion).await?;
+            // MODIFIED: Added Box::pin for recursive async call
+            Box::pin(search_files_recursive_mcp_internal(&app_handle_clone, root_search_path.clone(), &pattern_lower_clone, &mut matches, 0, max_depth_clone, &files_root_clone, &temp_config_guard_for_recursion)).await?;
         } else {
             if !app_handle_clone.fs_scope().is_allowed(&root_search_path) {
                  let temp_config_guard_for_validation = deps.config_state.read().map_err(|e| AppError::ConfigError(format!("Config lock for validation: {}", e)))?;
@@ -429,7 +424,6 @@ pub async fn mcp_search_files(deps: &ToolDependencies, params: SearchFilesParams
         matches.sort();
         Result::<Vec<String>, AppError>::Ok(matches)
     };
-     // Drop config_guard here explicitly if not dropped implicitly by scope end before timeout.
     drop(config_guard);
 
     match timeout(Duration::from_millis(params.timeout_ms.unwrap_or(FILE_SEARCH_TIMEOUT_MS_MCP)), search_operation).await {
