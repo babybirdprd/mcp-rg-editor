@@ -42,16 +42,14 @@ fn create_tool_input_schema(
     required_props: Vec<String>,
     props_map: HashMap<String, Value>
 ) -> ToolInputSchema {
-    ToolInputSchema {
-        type_: "object".to_string(),
-        // MODIFIED: Changed from Option<Vec<String>> to Vec<String>
-        // The rust-mcp-schema crate defines `required` as `Vec<String>`.
-        // The `serde` attributes `skip_serializing_if = "Vec::is_empty", default` on the
-        // `ToolInputSchema` struct in the `rust-mcp-schema` crate will handle the empty case.
-        required: required_props,
-        properties: props_to_tool_input_schema_props(props_map),
-        // MODIFIED: Removed meta field as it's not part of rust-mcp-schema::ToolInputSchema
-    }
+    // MODIFIED: Use the public constructor ToolInputSchema::new
+    // This constructor internally sets type_ = "object".to_string()
+    // and correctly handles the optional properties.
+    // The "2025-03-26" schema for ToolInputSchema does not have a `meta` field.
+    ToolInputSchema::new(
+        required_props,
+        props_to_tool_input_schema_props(props_map)
+    )
 }
 
 // --- MCP Tool Schemas ---

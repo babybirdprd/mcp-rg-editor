@@ -13,7 +13,7 @@ use rust_mcp_sdk::mcp_server::ServerHandler;
 use rust_mcp_schema::{
     CallToolRequest, CallToolResult, ListToolsRequest, ListToolsResult, Tool,
     CallToolResultContentItem, 
-    TextContent,               
+    TextContent, // MODIFIED: Removed JsonContent, TextContent is used.              
     schema_utils::CallToolError, RpcError, schema_utils::RpcErrorCodes, 
 };
 use serde_json::Value;
@@ -66,7 +66,6 @@ fn mcp_call_tool_error_from_app_error(app_err: AppError, tool_name: &str) -> Cal
         AppError::PathTraversal(ref msg) | 
         AppError::InvalidPath(ref msg) => (RpcErrorCodes::INVALID_PARAMS, msg.clone()),
         AppError::CommandBlocked(ref cmd_name) => {
-            // Use INTERNAL_ERROR as the enum variant, but include the specific code in the message.
             (RpcErrorCodes::INTERNAL_ERROR, format!("Command blocked (Server Code -32001): {}", cmd_name))
         },
         _ => (RpcErrorCodes::INTERNAL_ERROR, app_err.to_string()),
@@ -76,6 +75,8 @@ fn mcp_call_tool_error_from_app_error(app_err: AppError, tool_name: &str) -> Cal
 }
 
 fn create_mcp_json_call_tool_result(value: Value) -> Result<CallToolResult, CallToolError> {
+    // MODIFIED: Reverted to serializing to string and using TextContent
+    // as JsonContent variant is not available in the used schema version.
     let json_string = serde_json::to_string(&value)
         .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INTERNAL_ERROR, format!("Failed to serialize result to JSON string: {}", e), None)))?;
     
