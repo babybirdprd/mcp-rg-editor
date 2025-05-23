@@ -12,14 +12,13 @@ use crate::mcp::McpServerLaunchParams;
 use std::sync::Arc;
 use tauri::Manager;
 use tracing::Level;
-use tracing_subscriber::{filter::EnvFilter, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use rust_mcp_sdk::McpServer;
 use rust_mcp_sdk::mcp_server::{server_runtime, ServerRuntime as McpServerRuntime};
 use rust_mcp_sdk::error::McpSdkError;
 use rust_mcp_schema::{InitializeResult as McpInitializeResult, Implementation as McpImplementation, ServerCapabilities as McpServerCapabilities, ServerCapabilitiesTools as McpServerCapabilitiesTools, LATEST_PROTOCOL_VERSION as MCP_LATEST_PROTOCOL_VERSION};
 use rust_mcp_transport::{StdioTransport as McpStdioTransport, TransportOptions as McpTransportOptions};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 
 #[cfg(feature = "mcp-sse-server")]
@@ -36,21 +35,11 @@ fn setup_tracing_and_logging(log_level_str: &str, app_handle: &tauri::AppHandle)
         _ => Level::INFO,
     };
 
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("mcp_rg_editor_tauri_lib={},hyper=warn,rustls=warn", level)));
-
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_target(true)
-        .with_ansi(false)
-        .with_writer(std::io::stderr)
-        .with_level(true)
-        .with_span_events(FmtSpan::CLOSE);
-
     let tauri_log_targets = [
         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
             file_name: Some("app_backend.log".into()),
-        }), // Removed .with_level for Target
-        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview), // Removed .with_level for Target
+        }),
+        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
     ];
 
     let log_plugin_instance = tauri_plugin_log::Builder::default()
@@ -67,13 +56,6 @@ fn setup_tracing_and_logging(log_level_str: &str, app_handle: &tauri::AppHandle)
         .build();
 
     app_handle.plugin(log_plugin_instance).expect("Failed to initialize tauri-plugin-log");
-
-    tracing_subscriber::registry()
-        .with(fmt_layer)
-        .with(env_filter)
-        .init();
-
-    tracing::info!("Tracing subscriber initialized. Global tracing log level: {}. tauri-plugin-log also initialized.", level);
 }
 
 
@@ -136,7 +118,7 @@ pub fn run() {
                 config_state: mcp_config_state_clone,
             };
 
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 tracing::info!("Attempting to start MCP server...");
                 let transport_mode_from_config = {
                     let cfg_guard = mcp_launch_params.config_state.read().expect("Failed to read config for MCP transport");
