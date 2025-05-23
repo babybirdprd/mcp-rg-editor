@@ -41,14 +41,7 @@
   },
   "plugins": {
     "fs": {
-      "scope": [
-        "$APPCONFIG/**", "$APPLOG/**", "$APPDATA/**", "$APPCACHE/**",
-        "$DESKTOP/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$HOME/**"
-      ],
-      "globalScope": [ 
-        "$APPCONFIG/**", "$APPLOG/**", "$APPDATA/**", "$APPCACHE/**",
-        "$DESKTOP/**", "$DOCUMENT/**", "$DOWNLOAD/**", "$HOME/**"
-      ]
+      "requireLiteralLeadingDot": false
     },
     "shell": {
       "open": true, 

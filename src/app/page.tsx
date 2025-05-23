@@ -55,7 +55,7 @@ export default function Home() {
         <p className="text-sm text-muted-foreground">
           {greetMsg}
         </p>
-        <Button onClick={callGreet} disabled={isLoading} className="w-full">
+        <Button onClick={() => { void callGreet(); }} disabled={isLoading} className="w-full">
           {isLoading ? "Calling..." : 'Call "greet" from Rust'}
         </Button>
       </section>
