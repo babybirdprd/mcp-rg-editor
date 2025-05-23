@@ -59,18 +59,25 @@ impl EnhancedServerHandler {
 
 fn mcp_call_tool_error_from_app_error(app_err: AppError, tool_name: &str) -> CallToolError {
     error!(error = %app_err, tool = tool_name, "Error during MCP tool execution");
-    // MODIFIED: rpc_error_code_val is i64, and passed directly to RpcError::new
-    let rpc_error_code_val: i64 = match app_err {
-        AppError::InvalidInputArgument(_) | AppError::PathNotAllowed(_) | AppError::PathTraversal(_) | AppError::InvalidPath(_) => RpcErrorCodes::INVALID_PARAMS.into(),
-        AppError::CommandBlocked(_) => -32001i64, // Custom server error code for CommandBlocked
-        _ => RpcErrorCodes::INTERNAL_ERROR.into(),
+    
+    let (rpc_error_code_enum, message) = match app_err {
+        AppError::InvalidInputArgument(ref msg) | 
+        AppError::PathNotAllowed(ref msg) | 
+        AppError::PathTraversal(ref msg) | 
+        AppError::InvalidPath(ref msg) => (RpcErrorCodes::INVALID_PARAMS, msg.clone()),
+        AppError::CommandBlocked(ref cmd_name) => {
+            // Use INTERNAL_ERROR as the enum variant, but include the specific code in the message.
+            (RpcErrorCodes::INTERNAL_ERROR, format!("Command blocked (Server Code -32001): {}", cmd_name))
+        },
+        _ => (RpcErrorCodes::INTERNAL_ERROR, app_err.to_string()),
     };
-    CallToolError::new(RpcError::new(rpc_error_code_val, app_err.to_string(), None))
+    
+    CallToolError::new(RpcError::new(rpc_error_code_enum, message, None))
 }
 
 fn create_mcp_json_call_tool_result(value: Value) -> Result<CallToolResult, CallToolError> {
     let json_string = serde_json::to_string(&value)
-        .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INTERNAL_ERROR.into(), format!("Failed to serialize result to JSON string: {}", e), None)))?;
+        .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INTERNAL_ERROR, format!("Failed to serialize result to JSON string: {}", e), None)))?;
     
     let content_item = CallToolResultContentItem::TextContent(TextContent::new(
         json_string,
@@ -127,64 +134,64 @@ impl ServerHandler for EnhancedServerHandler {
             "mcp_get_config" => {
                 let current_config_data = { 
                     let config_guard = self.deps.config_state.read()
-                        .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INTERNAL_ERROR.into(), format!("Config lock error: {}", e), None)))?;
+                        .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INTERNAL_ERROR, format!("Config lock error: {}", e), None)))?;
                     config_guard.clone()
                 };
                 let value_result = serde_json::to_value(current_config_data)
-                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INTERNAL_ERROR.into(), format!("Failed to serialize config: {}", e), None)))?;
+                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INTERNAL_ERROR, format!("Failed to serialize config: {}", e), None)))?;
                 create_mcp_json_call_tool_result(value_result)
             }
             "read_file" => {
                 let params: tool_impl::filesystem::ReadFileParamsMCP = serde_json::from_value(args_value.clone())
-                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS.into(), e.to_string(), None)))?;
+                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS, e.to_string(), None)))?;
                 let result = tool_impl::filesystem::mcp_read_file(&self.deps, params).await.map_err(|e| mcp_call_tool_error_from_app_error(e, tool_name))?;
                 create_mcp_json_call_tool_result(serde_json::to_value(result).unwrap())
             }
             "write_file" => {
                 let params: tool_impl::filesystem::WriteFileParamsMCP = serde_json::from_value(args_value.clone())
-                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS.into(), e.to_string(), None)))?;
+                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS, e.to_string(), None)))?;
                 let result = tool_impl::filesystem::mcp_write_file(&self.deps, params).await.map_err(|e| mcp_call_tool_error_from_app_error(e, tool_name))?;
                 create_mcp_json_call_tool_result(serde_json::to_value(result).unwrap())
             }
              "create_directory" => {
                 let params: tool_impl::filesystem::CreateDirectoryParamsMCP = serde_json::from_value(args_value.clone())
-                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS.into(), e.to_string(), None)))?;
+                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS, e.to_string(), None)))?;
                 let result = tool_impl::filesystem::mcp_create_directory(&self.deps, params).await.map_err(|e| mcp_call_tool_error_from_app_error(e, tool_name))?;
                 create_mcp_json_call_tool_result(serde_json::to_value(result).unwrap())
             }
             "list_directory" => {
                 let params: tool_impl::filesystem::ListDirectoryParamsMCP = serde_json::from_value(args_value.clone())
-                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS.into(), e.to_string(), None)))?;
+                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS, e.to_string(), None)))?;
                 let result = tool_impl::filesystem::mcp_list_directory(&self.deps, params).await.map_err(|e| mcp_call_tool_error_from_app_error(e, tool_name))?;
                 create_mcp_json_call_tool_result(serde_json::to_value(result).unwrap())
             }
             "move_file" => {
                 let params: tool_impl::filesystem::MoveFileParamsMCP = serde_json::from_value(args_value.clone())
-                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS.into(), e.to_string(), None)))?;
+                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS, e.to_string(), None)))?;
                 let result = tool_impl::filesystem::mcp_move_file(&self.deps, params).await.map_err(|e| mcp_call_tool_error_from_app_error(e, tool_name))?;
                 create_mcp_json_call_tool_result(serde_json::to_value(result).unwrap())
             }
             "get_file_info" => {
                 let params: tool_impl::filesystem::GetFileInfoParamsMCP = serde_json::from_value(args_value.clone())
-                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS.into(), e.to_string(), None)))?;
+                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS, e.to_string(), None)))?;
                 let result = tool_impl::filesystem::mcp_get_file_info(&self.deps, params).await.map_err(|e| mcp_call_tool_error_from_app_error(e, tool_name))?;
                 create_mcp_json_call_tool_result(serde_json::to_value(result).unwrap())
             }
             "read_multiple_files" => {
                 let params: tool_impl::filesystem::ReadMultipleFilesParamsMCP = serde_json::from_value(args_value.clone())
-                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS.into(), e.to_string(), None)))?;
+                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS, e.to_string(), None)))?;
                 let result = tool_impl::filesystem::mcp_read_multiple_files(&self.deps, params).await.map_err(|e| mcp_call_tool_error_from_app_error(e, tool_name))?;
                 create_mcp_json_call_tool_result(serde_json::to_value(result).unwrap())
             }
             "search_files" => {
                 let params: tool_impl::filesystem::SearchFilesParamsMCP = serde_json::from_value(args_value.clone())
-                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS.into(), e.to_string(), None)))?;
+                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS, e.to_string(), None)))?;
                 let result = tool_impl::filesystem::mcp_search_files(&self.deps, params).await.map_err(|e| mcp_call_tool_error_from_app_error(e, tool_name))?;
                 create_mcp_json_call_tool_result(serde_json::to_value(result).unwrap())
             }
             "search_code" => {
                 let params: tool_impl::ripgrep::SearchCodeParamsMCP = serde_json::from_value(args_value.clone())
-                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS.into(), e.to_string(), None)))?;
+                    .map_err(|e| CallToolError::new(RpcError::new(RpcErrorCodes::INVALID_PARAMS, e.to_string(), None)))?;
                 let result = tool_impl::ripgrep::mcp_search_code(&self.deps, params).await.map_err(|e| mcp_call_tool_error_from_app_error(e, tool_name))?;
                 create_mcp_json_call_tool_result(serde_json::to_value(result).unwrap())
             }
