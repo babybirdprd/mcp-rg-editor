@@ -1,5 +1,3 @@
-// FILE: src-tauri/src/utils/line_ending_handler.rs
-// IMPORTANT NOTE: Rewrite the entire file.
 use tracing::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -7,11 +5,13 @@ pub enum LineEndingStyle {
     Lf,
     CrLf,
     Cr,
+    #[allow(dead_code)] // Acknowledging this variant is not currently constructed by detect_line_ending
     Mixed,
     Unknown,
 }
 
 impl LineEndingStyle {
+    #[allow(dead_code)] // Acknowledging this method is not currently used directly
     pub fn as_str(&self) -> &'static str {
         match self {
             LineEndingStyle::Lf => "\n",
@@ -66,17 +66,26 @@ pub fn detect_line_ending(content: &str) -> LineEndingStyle {
         return LineEndingStyle::Cr;
     }
     
+    // If we have a mix, decide a primary.
+    // This logic doesn't explicitly return Mixed. It picks one.
+    // If truly mixed output is desired, this logic needs adjustment.
     if crlf_count == 0 && lf_count == 0 && cr_count == 0 {
-        return LineEndingStyle::Unknown;
+        return LineEndingStyle::Unknown; // No line endings found
     }
 
-    if crlf_count >= lf_count && crlf_count >= cr_count {
+    // Prioritize: CRLF > LF > CR if mixed
+    if crlf_count > 0 && (crlf_count >= lf_count && crlf_count >= cr_count) {
         return LineEndingStyle::CrLf;
     }
-    if lf_count >= crlf_count && lf_count >= cr_count {
+    if lf_count > 0 && (lf_count >= crlf_count && lf_count >= cr_count) {
         return LineEndingStyle::Lf;
     }
-    return LineEndingStyle::Cr;
+    if cr_count > 0 { // Only CRs left or CRs are dominant among remaining
+        return LineEndingStyle::Cr;
+    }
+    
+    // Fallback, should ideally not be reached if any line endings were found
+    LineEndingStyle::Unknown
 }
 
 pub fn normalize_line_endings(text: &str, target_style: LineEndingStyle) -> String {
@@ -93,6 +102,6 @@ pub fn normalize_line_endings(text: &str, target_style: LineEndingStyle) -> Stri
         LineEndingStyle::Lf => normalized_to_lf,
         LineEndingStyle::CrLf => normalized_to_lf.replace('\n', "\r\n"),
         LineEndingStyle::Cr => normalized_to_lf.replace('\n', "\r"),
-        _ => normalized_to_lf,
+        _ => normalized_to_lf, // Should not happen due to effective_target_style logic
     }
 }

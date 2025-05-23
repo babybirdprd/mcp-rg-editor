@@ -1,73 +1,6 @@
 Parsed Rust Compiler Output:
 
 --- Message 1 ---
-Level: warning
-Message: field `session_id` is never read
-File: src-tauri\src\commands\terminal_commands.rs
-Location: Line 20, Column 12
-Label: field in this struct
-Code Context: pub struct ActiveSession {
-  note: `ActiveSession` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
-  note: `#[warn(dead_code)]` on by default
-Full Rendered Output:
-warning: field `session_id` is never read
-  --> src-tauri\src\commands\terminal_commands.rs:25:9
-   |
-20 | pub struct ActiveSession {
-   |            ------------- field in this struct
-...
-25 |     pub session_id: String,
-   |         ^^^^^^^^^^
-   |
-   = note: `ActiveSession` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
-   = note: `#[warn(dead_code)]` on by default
-
-
-
-
---- Message 2 ---
-Level: warning
-Message: variant `Mixed` is never constructed
-File: src-tauri\src\utils\line_ending_handler.rs
-Location: Line 6, Column 10
-Label: variant in this enum
-Code Context: pub enum LineEndingStyle {
-  note: `LineEndingStyle` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
-Full Rendered Output:
-warning: variant `Mixed` is never constructed
-  --> src-tauri\src\utils\line_ending_handler.rs:10:5
-   |
-6  | pub enum LineEndingStyle {
-   |          --------------- variant in this enum
-...
-10 |     Mixed,
-   |     ^^^^^
-   |
-   = note: `LineEndingStyle` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
-
-
-
-
---- Message 3 ---
-Level: warning
-Message: method `as_str` is never used
-File: src-tauri\src\utils\line_ending_handler.rs
-Location: Line 14, Column 1
-Label: method in this implementation
-Code Context: impl LineEndingStyle {
-Full Rendered Output:
-warning: method `as_str` is never used
-  --> src-tauri\src\utils\line_ending_handler.rs:15:12
-   |
-14 | impl LineEndingStyle {
-   | -------------------- method in this implementation
-15 |     pub fn as_str(&self) -> &'static str {
-   |            ^^^^^^
-
-
-
-
---- Message 4 ---
 Level: error
 Message: field `type_` of struct `ToolInputSchema` is private
 File: src-tauri\src\mcp\schemas.rs
@@ -82,3 +15,15 @@ error[E0451]: field `type_` of struct `ToolInputSchema` is private
    |     --------------- in this type
 46 |         type_: "object".to_string(),
    |         ^^^^^ private field
+
+
+
+
+--- Message 2 ---
+Level: failure-note
+Message: For more information about this error, try `rustc --explain E0451`.
+Full Rendered Output:
+For more information about this error, try `rustc --explain E0451`.
+
+
+

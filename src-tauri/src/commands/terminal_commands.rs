@@ -10,7 +10,7 @@ use tauri_plugin_shell::process::CommandChild;
 use tokio::sync::Mutex as TokioMutex; // Keep TokioMutex for ActiveSession
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ExecuteCommandResultUI { // Kept for potential direct UI use if needed later
+pub struct ExecuteCommandResultUI { 
     pub session_id: String,
     pub pid: Option<u32>,
     pub message: String,
@@ -22,6 +22,7 @@ pub struct ActiveSession {
     pub command_str: String,
     pub exit_code: Arc<TokioMutex<Option<i32>>>,
     pub start_time_system: std::time::SystemTime,
+    #[allow(dead_code)] // session_id is used as key in map and for SessionInfoMCP, but not read directly from ActiveSession instance itself
     pub session_id: String,
     pub pid: Option<u32>,
 }
