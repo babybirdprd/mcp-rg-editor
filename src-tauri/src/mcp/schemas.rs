@@ -44,10 +44,13 @@ fn create_tool_input_schema(
 ) -> ToolInputSchema {
     ToolInputSchema {
         type_: "object".to_string(),
-        // Corrected based on compiler error: ToolInputSchema.required expects Vec<String>
-        required: if required_props.is_empty() { Vec::new() } else { required_props },
+        // MODIFIED: Changed from Option<Vec<String>> to Vec<String>
+        // The rust-mcp-schema crate defines `required` as `Vec<String>`.
+        // The `serde` attributes `skip_serializing_if = "Vec::is_empty", default` on the
+        // `ToolInputSchema` struct in the `rust-mcp-schema` crate will handle the empty case.
+        required: required_props,
         properties: props_to_tool_input_schema_props(props_map),
-        // Removed meta field as it's not part of rust-mcp-schema::ToolInputSchema
+        // MODIFIED: Removed meta field as it's not part of rust-mcp-schema::ToolInputSchema
     }
 }
 

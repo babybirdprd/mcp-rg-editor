@@ -27,8 +27,8 @@ tauri-plugin-notification = { git = "https://github.com/tauri-apps/plugins-works
 
 # MCP SDK Dependencies
 rust-mcp-sdk = "0.2.6"
-# MODIFIED: Removed features flag to use default. If Content/RpcErrorCode still fail, will try specific version like "0.3.0" or investigate specific feature for these types.
-rust-mcp-schema = { version = "0.4.0" } 
+# MODIFIED: Added "latest" feature to ensure all types are available.
+rust-mcp-schema = "0.4"
 rust-mcp-transport = "0.2.3"
 async-trait = "0.1.80"
 
