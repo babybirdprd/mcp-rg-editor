@@ -44,20 +44,10 @@
       "requireLiteralLeadingDot": false
     },
     "shell": {
-      "open": true, 
-      "scope": [
-        { "name": "allow-rg", "cmd": "rg", "args": true, "sidecar": false },
-        { "name": "allow-sh", "cmd": "sh", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
-        { "name": "allow-bash", "cmd": "bash", "args": ["-c", { "validator": "\\S+" }], "sidecar": false },
-        { "name": "allow-powershell", "cmd": "powershell", "args": ["-Command", { "validator": "\\S+" }], "sidecar": false },
-        { "name": "allow-cmd", "cmd": "cmd", "args": ["/C", { "validator": "\\S+" }], "sidecar": false }
-      ]
+      "open": true
     },
-    "process": {}, 
-    "http": {
-      "scope": ["https://*/*", "http://*/*"] 
-    },
-    "dialog": {},
+    "process": {},
+    "dialog": null,
     "notification": {},
     "log": {
       "targets": [
