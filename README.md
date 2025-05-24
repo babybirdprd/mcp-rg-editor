@@ -126,6 +126,11 @@ You can also set this in a `.env` file in the `src-tauri` directory:
 MCP_TRANSPORT=sse
 ```
 
+### Default URLs and Ports for MCP Transport Modes
+
+- **stdio**: The backend communicates over standard input/output (stdio) and does not expose a network port or URL. This mode is only accessible internally by the Tauri app and is not reachable from external clients.
+- **sse**: The backend starts a local HTTP server for Server-Sent Events (SSE) on `http://127.0.0.1:14338` by default. The frontend connects to this URL to receive events and communicate with the backend. You can override the port by setting the `MCP_SSE_PORT` environment variable (e.g., `MCP_SSE_PORT=14338`).
+
 The file root for all file operations is set by the `FILES_ROOT` environment variable (or in your `.env` file). This must be an absolute path or a path like `~/mcp_files`. If `FILES_ROOT` is not set, the app will not start and will show an error. Example for PowerShell:
 
 ```powershell
