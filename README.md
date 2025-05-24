@@ -1,4 +1,4 @@
-# Tauri 2.0 + Next.js 15 App Router Template
+# MCP RG Editor
 
 ![Tauri window screenshot](public/tauri-nextjs-template-2_screenshot.png)
 
@@ -25,49 +25,144 @@ manager, and uses the [App Router](https://nextjs.org/docs/app) model for Next.j
   - [clippy](https://github.com/rust-lang/rust-clippy) and
     [rustfmt](https://github.com/rust-lang/rustfmt) for Rust code
 - GitHub Actions to check code formatting and linting for both TypeScript and Rust
+- Integrated MCP (Model Context Protocol) server backend with support for STDIO and SSE transports.
 
 ## Getting Started
 
-### Running development server and use Tauri window
+### 1. Initial Setup
 
-After cloning for the first time, change your app identifier inside
-`src-tauri/tauri.conf.json` to your own:
+After cloning for the first time:
 
-```jsonc
-{
-  // ...
-  // The default "com.tauri.dev" will prevent you from building in release mode
-  "identifier": "com.my-application-name.app",
-  // ...
-}
-```
+1.  **Configure App Identifier:**
+    Change your app identifier inside `src-tauri/tauri.conf.json` to your own:
+    ```jsonc
+    {
+      // ...
+      // The default "com.tauri.dev" will prevent you from building in release mode
+      "identifier": "com.your-organization.your-app-name", // Replace this
+      // ...
+    }
+    ```
+
+2.  **Set Up Environment Variables:**
+    Create a `.env` file in the `src-tauri/` directory with the following content. **This is crucial for the application to start correctly.**
+    ```env
+    # src-tauri/.env
+
+    # CRITICAL: Set the root directory for all file operations.
+    # Replace with an actual absolute path or a tilde-expanded path.
+    # Example for Windows: FILES_ROOT=C:/Users/YourName/mcp_rg_editor_files
+    # Example for macOS/Linux: FILES_ROOT=~/mcp_rg_editor_files
+    FILES_ROOT=your/path/to/mcp_files
+
+    # Choose the MCP transport mode. Options: "stdio", "sse", "disabled".
+    # To use SSE, ensure you also enable the "mcp-sse-server" feature when running/building.
+    MCP_TRANSPORT=sse
+
+    # Optional: Port for the MCP SSE server (defaults to 3030 if not set).
+    MCP_SSE_PORT=3030
+
+    # Optional: Host for the MCP SSE server (defaults to 127.0.0.1 if not set).
+    # MCP_SSE_HOST=127.0.0.1
+
+    # Optional: Set the application's log level. Options: "trace", "debug", "info", "warn", "error".
+    # LOG_LEVEL=info
+
+    # Optional: Comma-separated list of additional directories the app can access.
+    # If empty, defaults to FILES_ROOT.
+    # ALLOWED_DIRECTORIES=~/another_project,/opt/shared_data
+
+    # Optional: Comma-separated list of commands to block from terminal execution.
+    # BLOCKED_COMMANDS=sudo,rm
+
+    # Optional: Default shell for the 'execute_command' tool. System default if empty.
+    # DEFAULT_SHELL=bash
+    ```
+    **Important:** Make sure the directory specified for `FILES_ROOT` exists, or the application will attempt to create it and might fail if permissions are insufficient.
+
+### 2. Running Development Server and Tauri Window
 
 To develop and run the frontend in a Tauri window:
 
-```shell
-pnpm tauri dev
-```
+*   **For STDIO MCP Transport:**
+    Ensure `MCP_TRANSPORT=stdio` is set in `src-tauri/.env`.
+    ```shell
+    pnpm tauri dev --features "mcp-stdio-server"
+    ```
+    (If `mcp-stdio-server` is part of your default features in `src-tauri/Cargo.toml`, you might not need to specify `--features` explicitly if it's the only MCP feature you want active).
 
-This will load the Next.js frontend directly in a Tauri webview window, in addition to
-starting a development server on `localhost:3000`.
-Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> in a Chromium based WebView (e.g. on
-Windows) to open the web developer console from the Tauri window.
+*   **For SSE MCP Transport (Recommended for external tools like MCP Inspector):**
+    Ensure `MCP_TRANSPORT=sse` and optionally `MCP_SSE_PORT` are set in `src-tauri/.env`.
+    ```shell
+    pnpm tauri dev --features "mcp-sse-server"
+    ```
+    The SSE server will typically start on `http://127.0.0.1:3030/sse` (or the port specified by `MCP_SSE_PORT`). Check the console logs from `pnpm tauri dev` for the exact address.
 
-### Building for release
+*   **To have both transports compiled and switchable via `MCP_TRANSPORT` env var:**
+    ```shell
+    pnpm tauri dev --features "mcp-stdio-server,mcp-sse-server"
+    ```
+    Then, you can change `MCP_TRANSPORT` in your `.env` file and restart `pnpm tauri dev` to switch modes.
+
+This will load the Next.js frontend directly in a Tauri webview window (served from `http://localhost:3000` by Next.js) and start the Rust backend with the configured MCP server.
+Press <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> (Windows/Linux) or <kbd>Cmd</kbd>+<kbd>Option</kbd>+<kbd>I</kbd> (macOS) in the Tauri window to open the web developer console.
+
+### 3. Building for Release
 
 To export the Next.js frontend via SSG and build the Tauri application for release:
 
-```shell
-pnpm tauri build
-```
+1.  Ensure your `src-tauri/.env` file is configured for the desired MCP transport mode for the production build.
+2.  Run the build command with the appropriate feature flag:
+    *   For SSE:
+        ```shell
+        pnpm tauri build --features "mcp-sse-server"
+        ```
+    *   For STDIO:
+        ```shell
+        pnpm tauri build --features "mcp-stdio-server"
+        ```
+    *   To build a debug version (not optimized, includes debug symbols):
+        ```shell
+        pnpm tauri build --features "mcp-sse-server" --debug
+        ```
 
-### Source structure
+The bundled application will be located in `src-tauri/target/release/bundle/` (or `src-tauri/target/debug/bundle/` for debug builds).
 
-Next.js frontend source files are located in `src/` and Tauri Rust application source
-files are located in `src-tauri/`. Please consult the Next.js and Tauri documentation
-respectively for questions pertaining to either technology.
+## Source Structure
 
-## Caveats
+Next.js frontend source files are located in `src/` and Tauri Rust application source files are located in `src-tauri/`. Please consult the Next.js and Tauri documentation respectively for questions pertaining to either technology.
+
+## MCP Server Details
+
+This application includes an embedded MCP server in its Rust backend (`src-tauri`).
+
+### Supported Transports:
+
+*   **stdio:** Communicates over standard input/output. This mode is primarily for internal use or when the Tauri app itself acts as the sole client.
+*   **sse (Server-Sent Events):** Starts an HTTP server for SSE.
+    *   **Default URL:** `http://127.0.0.1:3030/sse`
+    *   The port can be configured using the `MCP_SSE_PORT` environment variable (e.g., `MCP_SSE_PORT=14338`).
+    *   The host can be configured using the `MCP_SSE_HOST` environment variable (e.g., `MCP_SSE_HOST=0.0.0.0` to listen on all interfaces, use with caution).
+*   **disabled:** The MCP server will not be started.
+
+The active transport mode is determined by the `MCP_TRANSPORT` environment variable at runtime, provided the corresponding feature (`mcp-stdio-server` or `mcp-sse-server`) was enabled during compilation. If both features are compiled, `MCP_TRANSPORT` dictates the choice. If only one feature is compiled, it becomes the default if `MCP_TRANSPORT` is not set or set to that mode.
+
+### File System Configuration:
+
+*   **`FILES_ROOT` (Required):** This environment variable defines the primary directory the application's file operations are sandboxed to. It must be an absolute path (e.g., `C:/Users/YourName/mcp_files`) or a tilde-expanded path (e.g., `~/mcp_files`). The application will attempt to create this directory if it doesn't exist.
+*   **`ALLOWED_DIRECTORIES` (Optional):** A comma-separated list of additional absolute or tilde-expanded paths that the application is allowed to access. If not set, access is restricted to `FILES_ROOT`.
+*   **`MCP_LOG_DIR` (Optional):** Specifies the directory for storing audit and fuzzy search logs. Defaults to a subdirectory within Tauri's application log directory (e.g., `~/.config/com.your-organization.your-app-name/logs/mcp-rg-editor-logs` on Linux).
+
+## Known Issues & Considerations
+
+*   **Terminal Command Output (MCP):**
+    The `execute_command` MCP tool currently has an issue where the session cleanup might occur too quickly after the command finishes. This can make it difficult for an MCP client to reliably retrieve the complete output or final status of a command using the `read_session_output_status` tool, especially for short-lived commands. The output is streamed to the Tauri frontend via events correctly, but direct MCP retrieval needs improvement for robustness.
+
+*   **Ripgrep (`rg`) Dependency:**
+    The `search_code` tool relies on `ripgrep` (rg) being installed and available in the system's PATH.
+    *   **Consideration:** For improved portability and to avoid external dependencies for the end-user, bundling `ripgrep` as a [Tauri sidecar](https://v2.tauri.app/develop/sidecar/) is a potential future enhancement. This would ensure `rg` is always available to the application.
+
+## Caveats (from original template)
 
 ### Static Site Generation / Pre-rendering
 
@@ -86,7 +181,7 @@ to dynamically scale the image quality. This is only supported when deploying th
 frontend onto Vercel directly, and must be disabled to properly export the frontend
 statically. As such, the
 [`unoptimized` property](https://nextjs.org/docs/api-reference/next/image#unoptimized)
-is set to true for the `next/image` component in the `next.config.js` configuration.
+is set to true for the `next/image` component in the `next.config.ts` configuration.
 This will allow the image to be served as-is, without changes to its quality, size,
 or format.
 
@@ -101,51 +196,9 @@ have a notion of `window` or `navigator`.
 The solution is to ensure that the Tauri functions are imported as late as possible
 from within a client-side React component, or via [lazy loading](https://nextjs.org/docs/app/building-your-application/optimizing/lazy-loading).
 
-## MCP Transport Mode and File Root Configuration
-
-This app uses an environment variable `MCP_TRANSPORT` to control how the backend server communicates. You can set this variable at runtime to choose between different transport modes:
-
-- `stdio` — Use standard input/output (default if only `mcp-stdio-server` feature is enabled)
-- `sse` — Use server-sent events (default if only `mcp-sse-server` feature is enabled, or if both features are enabled)
-- `disabled` — Disable the MCP server
-
-**How to set at runtime (PowerShell example):**
-
-```powershell
-$env:MCP_TRANSPORT = "sse"
-pnpm tauri dev --features "mcp-sse-server mcp-stdio-server"
-```
-Or for stdio:
-```powershell
-$env:MCP_TRANSPORT = "stdio"
-pnpm tauri dev --features "mcp-sse-server mcp-stdio-server"
-```
-
-You can also set this in a `.env` file in the `src-tauri` directory:
-```
-MCP_TRANSPORT=sse
-```
-
-### Default URLs and Ports for MCP Transport Modes
-
-- **stdio**: The backend communicates over standard input/output (stdio) and does not expose a network port or URL. This mode is only accessible internally by the Tauri app and is not reachable from external clients.
-- **sse**: The backend starts a local HTTP server for Server-Sent Events (SSE) on `http://127.0.0.1:14338` by default. The frontend connects to this URL to receive events and communicate with the backend. You can override the port by setting the `MCP_SSE_PORT` environment variable (e.g., `MCP_SSE_PORT=14338`).
-
-The file root for all file operations is set by the `FILES_ROOT` environment variable (or in your `.env` file). This must be an absolute path or a path like `~/mcp_files`. If `FILES_ROOT` is not set, the app will not start and will show an error. Example for PowerShell:
-
-```powershell
-$env:FILES_ROOT = "C:/Users/YourName/mcp_files"
-```
-Or in your `.env` file in `src-tauri`:
-```
-FILES_ROOT=C:/Users/YourName/mcp_files
-```
-
-If you want to allow access to additional directories, set the `ALLOWED_DIRECTORIES` environment variable (comma-separated list of absolute paths). By default, only `FILES_ROOT` is allowed.
-
 ---
 
-**Planned improvement:**
+**Planned improvement (from original template):**
 > In the future, the app will provide a user-friendly wizard or installer to let users pick the transport mode and file root, so they never have to deal with environment variables or config files directly.
 
 ## Learn More
