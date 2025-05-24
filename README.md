@@ -101,6 +101,48 @@ have a notion of `window` or `navigator`.
 The solution is to ensure that the Tauri functions are imported as late as possible
 from within a client-side React component, or via [lazy loading](https://nextjs.org/docs/app/building-your-application/optimizing/lazy-loading).
 
+## MCP Transport Mode and File Root Configuration
+
+This app uses an environment variable `MCP_TRANSPORT` to control how the backend server communicates. You can set this variable at runtime to choose between different transport modes:
+
+- `stdio` — Use standard input/output (default if only `mcp-stdio-server` feature is enabled)
+- `sse` — Use server-sent events (default if only `mcp-sse-server` feature is enabled, or if both features are enabled)
+- `disabled` — Disable the MCP server
+
+**How to set at runtime (PowerShell example):**
+
+```powershell
+$env:MCP_TRANSPORT = "sse"
+pnpm tauri dev --features "mcp-sse-server mcp-stdio-server"
+```
+Or for stdio:
+```powershell
+$env:MCP_TRANSPORT = "stdio"
+pnpm tauri dev --features "mcp-sse-server mcp-stdio-server"
+```
+
+You can also set this in a `.env` file in the `src-tauri` directory:
+```
+MCP_TRANSPORT=sse
+```
+
+The file root for all file operations is set by the `FILES_ROOT` environment variable (or in your `.env` file). This must be an absolute path or a path like `~/mcp_files`. If `FILES_ROOT` is not set, the app will not start and will show an error. Example for PowerShell:
+
+```powershell
+$env:FILES_ROOT = "C:/Users/YourName/mcp_files"
+```
+Or in your `.env` file in `src-tauri`:
+```
+FILES_ROOT=C:/Users/YourName/mcp_files
+```
+
+If you want to allow access to additional directories, set the `ALLOWED_DIRECTORIES` environment variable (comma-separated list of absolute paths). By default, only `FILES_ROOT` is allowed.
+
+---
+
+**Planned improvement:**
+> In the future, the app will provide a user-friendly wizard or installer to let users pick the transport mode and file root, so they never have to deal with environment variables or config files directly.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:
