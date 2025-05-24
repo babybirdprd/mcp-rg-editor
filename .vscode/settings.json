@@ -1,0 +1,10 @@
+{
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "terminal.integrated.profiles.windows": {
+    "PowerShell": {
+      "path": "C:/Program Files/WindowsApps/Microsoft.PowerShell_7.5.1.0_x64__8wekyb3d8bbwe/pwsh.exe",
+      "icon": "terminal-powershell",
+      "args": []
+    }
+  }
+}

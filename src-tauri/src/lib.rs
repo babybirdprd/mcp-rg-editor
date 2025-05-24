@@ -1,3 +1,5 @@
+// FILE: src-tauri/src/lib.rs
+
 mod commands;
 mod config;
 mod error;
@@ -16,14 +18,20 @@ use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 use rust_mcp_sdk::McpServer;
 use rust_mcp_sdk::mcp_server::{server_runtime, ServerRuntime as McpServerRuntime};
-use rust_mcp_sdk::error::McpSdkError;
+use rust_mcp_sdk::error::McpSdkError; // Make sure McpSdkError is in scope
 use rust_mcp_schema::{InitializeResult as McpInitializeResult, Implementation as McpImplementation, ServerCapabilities as McpServerCapabilities, ServerCapabilitiesTools as McpServerCapabilitiesTools, LATEST_PROTOCOL_VERSION as MCP_LATEST_PROTOCOL_VERSION};
 use rust_mcp_transport::{StdioTransport as McpStdioTransport, TransportOptions as McpTransportOptions};
 
 
 #[cfg(feature = "mcp-sse-server")]
-use rust_mcp_sdk::hyper_server::{create_server as create_mcp_sse_server, HyperServerOptions as McpHyperServerOptions, HyperServerRuntime as McpHyperServerRuntime};
-
+use rust_mcp_sdk::mcp_server::{
+    hyper_server::create_server as create_mcp_sse_server,
+    HyperServerOptions as McpHyperServerOptions,
+    HyperServer as McpHyperServerRuntime // This is an alias for the HyperServer struct from the SDK
+    // Note: If McpHyperServerRuntime was intended to be a different type, this alias might need adjustment
+    // based on what `rust-mcp-sdk::mcp_server` actually exports as `HyperServerRuntime`.
+    // Given the SDK structure, `HyperServer` is the struct that `create_server` returns and that has the `start` method.
+};
 
 fn setup_tracing_and_logging(log_level_str: &str, app_handle: &tauri::AppHandle) {
     let level = match log_level_str.to_lowercase().as_str() {
@@ -168,11 +176,15 @@ pub fn run() {
                         let mcp_sse_options = McpHyperServerOptions {
                             host,
                             port,
-                            enable_cors: true,
+                            // enable_cors: true, // REMOVED: This field does not exist in rust-mcp-sdk 0.2.6 HyperServerOptions
                             ..Default::default()
                         };
                         let mcp_sse_server_runtime: McpHyperServerRuntime = create_mcp_sse_server(mcp_server_details, mcp_handler, mcp_sse_options);
-                         if let Err(e) = mcp_sse_server_runtime.start().await.map_err(map_mcp_sdk_error_sync) {
+                         if let Err(e) = mcp_sse_server_runtime.start().await
+                            .map_err(|transport_server_err| { // transport_server_err is TransportServerError
+                                let mcp_sdk_err: McpSdkError = transport_server_err.into(); // Convert to McpSdkError
+                                map_mcp_sdk_error_sync(mcp_sdk_err) // Now this matches the function signature
+                            }) {
                             tracing::error!("MCP SSE Server failed to start or shut down with error: {:?}", e);
                         } else {
                             tracing::info!("MCP SSE Server shut down.");
